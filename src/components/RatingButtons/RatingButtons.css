@@ -1,0 +1,26 @@
+.rating-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.rating-buttons__btn {
+  padding: 10px 18px;
+  border-radius: 10px;
+  border: 1.5px solid color-mix(in srgb, var(--rating-color) 20%, transparent);
+  background: var(--rating-bg);
+  color: var(--rating-color);
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+  min-width: 80px;
+}
+
+.rating-buttons__btn:hover {
+  background: var(--rating-color);
+  color: #fff;
+  transform: translateY(-2px);
+}

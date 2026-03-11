@@ -1,0 +1,86 @@
+.deck-item {
+  padding: 18px 22px;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: linear-gradient(135deg, #fff 0%, #f8f9fe 100%);
+  border: 1.5px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.deck-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+}
+
+.deck-item__name {
+  font-size: 17px;
+  font-weight: 700;
+  color: #1a1a2e;
+  font-family: 'Source Serif 4', Georgia, serif;
+}
+
+.deck-item__stats {
+  font-size: 13px;
+  color: #888;
+  margin-top: 4px;
+}
+
+.deck-item__due--active {
+  color: #e94560;
+  font-weight: 600;
+}
+
+.deck-item__due--clear {
+  color: #16c79a;
+  font-weight: 600;
+}
+
+.deck-item__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.deck-item__badge {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 800;
+  font-size: 15px;
+}
+
+.deck-item__badge--due {
+  background: linear-gradient(135deg, #e94560, #c73e54);
+}
+
+.deck-item__badge--clear {
+  background: linear-gradient(135deg, #16c79a, #12a87f);
+}
+
+.deck-item__delete-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1.5px solid rgba(0, 0, 0, 0.08);
+  background: white;
+  cursor: pointer;
+  font-size: 14px;
+  color: #ccc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.deck-item__delete-btn:hover {
+  color: #e94560;
+  border-color: #e94560;
+}

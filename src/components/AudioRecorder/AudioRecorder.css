@@ -1,0 +1,78 @@
+.audio-recorder {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.audio-recorder__record-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #e94560, #c73e54);
+  color: #fff;
+  border: none;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(233, 69, 96, 0.3);
+}
+
+.audio-recorder__record-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  display: inline-block;
+}
+
+.audio-recorder__stop-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 10px;
+  background: #1a1a2e;
+  color: #fff;
+  border: none;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  animation: pulse 1.5s infinite;
+}
+
+.audio-recorder__stop-icon {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: #e94560;
+  display: inline-block;
+  animation: pulse 1s infinite;
+}
+
+.audio-recorder__playback {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.audio-recorder__audio {
+  height: 36px;
+  border-radius: 8px;
+}
+
+.audio-recorder__remove-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(0, 0, 0, 0.12);
+  background: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #999;
+}
