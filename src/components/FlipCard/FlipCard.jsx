@@ -1,36 +1,82 @@
-import './FlipCard.css';
+import { useState, useRef, useEffect } from "react";
+import useTheme from "../../theme/useTheme.js";
 
-export default function FlipCard({ card, flipped, onFlip }) {
-  const renderSide = (side) => (
-    <div className="flip-card__content">
-      {side.text && <div className="flip-card__text">{side.text}</div>}
-      {side.drawing && <img src={side.drawing} alt="drawing" className="flip-card__drawing" />}
-      {side.audio && <audio src={side.audio} controls className="flip-card__audio" />}
-      {!side.text && !side.drawing && !side.audio && (
-        <div className="flip-card__empty">Empty side</div>
-      )}
+export default function FlipCard({ card, flipped, onFlip, style: wrapStyle = {} }) {
+  const { T } = useTheme();
+  const [cardHeight, setCardHeight] = useState(200);
+  const frontRef = useRef(null);
+  const backRef = useRef(null);
+  const CARD_MIN_H = 340;
+
+  useEffect(() => {
+    const measure = () => {
+      const fh = frontRef.current?.scrollHeight || 0;
+      const bh = backRef.current?.scrollHeight || 0;
+      setCardHeight(Math.max(fh, bh, CARD_MIN_H));
+    };
+    measure();
+    const timer = setTimeout(measure, 50);
+    return () => clearTimeout(timer);
+  }, [card, flipped]);
+
+  const renderSide = (side) => {
+    const hasDrawing = !!side.drawing;
+    const hasAudio = !!side.audio;
+    const hasText = !!side.text;
+    const textOnly = hasText && !hasDrawing && !hasAudio;
+    const empty = !hasText && !hasDrawing && !hasAudio;
+
+    return (
+      <div style={{
+        padding: "20px 22px", display: "flex", flexDirection: "column",
+        gap: 10, overflow: "hidden", boxSizing: "border-box", width: "100%",
+        minHeight: CARD_MIN_H - 38,
+        justifyContent: (textOnly || empty) ? "center" : "flex-start",
+        alignItems: (textOnly || empty) ? "center" : "stretch",
+      }}>
+        {hasText && (
+          <div style={{
+            fontSize: textOnly ? 22 : 17,
+            lineHeight: textOnly ? 1.5 : 1.7,
+            color: T.text, fontFamily: T.fontBody,
+            fontWeight: textOnly ? 500 : 400,
+            whiteSpace: "pre-wrap", wordBreak: "break-word",
+            textAlign: textOnly ? "center" : "left",
+            maxWidth: textOnly ? "90%" : "100%",
+          }}>{side.text}</div>
+        )}
+        {hasDrawing && <img src={side.drawing} alt="" style={{ width: "100%", borderRadius: 6, border: `1px solid ${T.border}`, display: "block" }} />}
+        {hasAudio && <audio src={side.audio} controls style={{ width: "100%", marginTop: 4, display: "block" }} />}
+        {empty && (
+          <div style={{ color: T.textLight, fontStyle: "italic", fontSize: 14, fontFamily: T.fontBody }}>Empty side</div>
+        )}
+      </div>
+    );
+  };
+
+  const faceBase = {
+    position: "absolute", top: 0, left: 0, width: "100%", minHeight: "100%",
+    backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden",
+    borderRadius: T.radiusLg, overflow: "hidden", border: `1px solid ${T.borderStrong}`,
+    boxShadow: T.shadow3, boxSizing: "border-box",
+  };
+
+  const header = (label) => (
+    <div style={{ padding: "10px 22px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 2, color: T.textLight, fontFamily: T.fontBody }}>{label}</span>
+      <span style={{ fontSize: 10, color: T.textLight, fontFamily: T.fontBody, letterSpacing: 0.5 }}>tap to flip</span>
     </div>
   );
 
   return (
-    <div onClick={onFlip} className="flip-card">
-      <div className={`flip-card__inner ${flipped ? 'flip-card__inner--flipped' : ''}`}>
-        {/* Front */}
-        <div className="flip-card__face flip-card__face--front">
-          <div className="flip-card__header">
-            <span className="flip-card__label flip-card__label--front">Front</span>
-            <span className="flip-card__hint">tap to flip</span>
-          </div>
-          {renderSide(card.front)}
-        </div>
-        {/* Back */}
-        <div className="flip-card__face flip-card__face--back">
-          <div className="flip-card__header">
-            <span className="flip-card__label flip-card__label--back">Back</span>
-            <span className="flip-card__hint">tap to flip</span>
-          </div>
-          {renderSide(card.back)}
-        </div>
+    <div role="button" tabIndex={0} aria-label={flipped ? "Flashcard showing back side, tap to flip" : "Flashcard showing front side, tap to flip"} onClick={onFlip} style={{ perspective: 900, cursor: "pointer", width: "100%", maxWidth: 580, margin: "0 auto", ...wrapStyle }}>
+      <div style={{
+        position: "relative", width: "100%", height: cardHeight,
+        transition: "transform 0.55s cubic-bezier(0.4,0,0.2,1)",
+        transformStyle: "preserve-3d", transform: flipped ? "rotateY(180deg)" : "rotateY(0)"
+      }}>
+        <div ref={frontRef} style={{ ...faceBase, background: T.card }}>{header("Front")}{renderSide(card.front)}</div>
+        <div ref={backRef} style={{ ...faceBase, background: T.cardAlt, transform: "rotateY(180deg)" }}>{header("Back")}{renderSide(card.back)}</div>
       </div>
     </div>
   );
