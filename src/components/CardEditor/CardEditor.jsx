@@ -14,6 +14,8 @@ export default function CardEditor({ initialFront, initialBack, initialTags, onS
   const [tagDropOpen, setTagDropOpen] = useState(false);
   const [flipping, setFlipping] = useState(false);
   const [flipAngle, setFlipAngle] = useState(0);
+  const [contentHidden, setContentHidden] = useState(false);
+  const [revealing, setRevealing] = useState(false);
   const flipTimer = useRef(null);
   const side = activeSide === "front" ? front : back;
   const setSide = activeSide === "front" ? setFront : setBack;
@@ -24,10 +26,15 @@ export default function CardEditor({ initialFront, initialBack, initialTags, onS
     setFlipping(true);
     setFlipAngle(prev => prev + 180);
     clearTimeout(flipTimer.current);
+    // Hide content just before midpoint, swap, then reveal after midpoint
+    setTimeout(() => setContentHidden(true), 180);
     flipTimer.current = setTimeout(() => {
       setActiveSide(newSide);
-      setFlipping(false);
-    }, 500);
+      setRevealing(true);
+      setTimeout(() => setContentHidden(false), 70);
+      setTimeout(() => setRevealing(false), 400);
+    }, 250);
+    setTimeout(() => setFlipping(false), 500);
   };
 
   const addTag = () => {
@@ -50,9 +57,13 @@ export default function CardEditor({ initialFront, initialBack, initialTags, onS
       }}>
         <div style={{
           transform: `rotateY(${-flipAngle}deg)`,
-          transition: "transform 0.5s cubic-bezier(0.4,0,0.2,1)",
+          opacity: contentHidden ? 0 : 1,
+          transition: "transform 0.5s cubic-bezier(0.4,0,0.2,1), opacity 0.2s ease",
         }}>
-        <div style={{ display: "flex", borderBottom: `1px solid ${T.border}` }}>
+        <div style={{
+          display: "flex", borderBottom: `1px solid ${T.border}`,
+          animation: revealing ? "cardEnter 0.2s ease both" : "none",
+        }}>
           {["front", "back"].map(s => (
             <button key={s} onClick={() => handleFlip(s)} style={{
               flex: 1, padding: "13px", border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
@@ -61,7 +72,10 @@ export default function CardEditor({ initialFront, initialBack, initialTags, onS
             }}>{s} side</button>
           ))}
         </div>
-        <div style={{ display: "flex", gap: 4, padding: "12px 18px", borderBottom: `1px solid ${T.border}` }}>
+        <div style={{
+          display: "flex", gap: 4, padding: "12px 18px", borderBottom: `1px solid ${T.border}`,
+          animation: revealing ? "cardEnter 0.2s ease 0.04s both" : "none",
+        }}>
           {tabs.map(t => (
             <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
               padding: "6px 14px", borderRadius: 6, border: `1.5px solid ${activeTab === t.id ? T.borderStrong : T.border}`,
@@ -70,7 +84,10 @@ export default function CardEditor({ initialFront, initialBack, initialTags, onS
             }}>{t.label}</button>
           ))}
         </div>
-        <div style={{ padding: "18px", minHeight: 280, overflow: "hidden", boxSizing: "border-box" }}>
+        <div style={{
+          padding: "18px", minHeight: 280, overflow: "hidden", boxSizing: "border-box",
+          animation: revealing ? "cardEnter 0.2s ease 0.08s both" : "none",
+        }}>
           {activeTab === "text" && (
             <textarea value={side.text} onChange={e => setSide({ ...side, text: e.target.value })}
               placeholder={`Type the ${activeSide} of your card...`}
@@ -103,6 +120,7 @@ export default function CardEditor({ initialFront, initialBack, initialTags, onS
             borderTop: `1px solid ${T.border}`,
             background: tagDropOpen ? T.bgSub : T.cardAlt,
             transition: "all 0.35s ease",
+            animation: revealing ? "cardEnter 0.2s ease 0.12s both" : "none",
           }}
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -173,7 +191,10 @@ export default function CardEditor({ initialFront, initialBack, initialTags, onS
           </div>
         </div>
 
-        <div style={{ padding: "14px 18px", display: "flex", justifyContent: "flex-end", gap: 10, borderTop: `1px solid ${T.border}` }}>
+        <div style={{
+          padding: "14px 18px", display: "flex", justifyContent: "flex-end", gap: 10, borderTop: `1px solid ${T.border}`,
+          animation: revealing ? "cardEnter 0.2s ease 0.16s both" : "none",
+        }}>
           <button onClick={onCancel} style={{
             padding: "10px 22px", borderRadius: T.radius, border: `1.5px solid ${T.border}`,
             background: T.white, color: T.textMid, fontWeight: 600, fontSize: 13, cursor: "pointer",

@@ -1,6 +1,6 @@
+import { useState, useRef, useEffect } from "react";
 import useTheme from "../../theme/useTheme.js";
 import FlipCard from "../../components/FlipCard/FlipCard.jsx";
-import RatingButtons from "../../components/RatingButtons/RatingButtons.jsx";
 import AiChatResult from "../../components/AiChatResult/AiChatResult.jsx";
 
 export default function StudyView({
@@ -15,11 +15,31 @@ export default function StudyView({
   const ratingColors = { 0: T.forgot, 2: T.hard, 3: T.good, 4: T.easy, 5: T.perfect };
   const ratingBgs = { 0: T.dueBg, 2: T.hardBg, 3: T.goodBg, 4: T.easyBg, 5: T.perfectBg };
 
+  const [cardPhase, setCardPhase] = useState("idle");
+  const phaseTimer = useRef(null);
+  const prevIndex = useRef(studyIndex);
+
+  useEffect(() => {
+    if (studyIndex !== prevIndex.current) {
+      prevIndex.current = studyIndex;
+      setCardPhase("enter");
+      clearTimeout(phaseTimer.current);
+      phaseTimer.current = setTimeout(() => setCardPhase("idle"), 350);
+    }
+  }, [studyIndex]);
+
+  const wrappedRate = (quality) => {
+    setCardPhase("dismiss");
+    clearTimeout(phaseTimer.current);
+    phaseTimer.current = setTimeout(() => {
+      handleRate(quality);
+    }, 350);
+  };
+
   // Completion screen
   if (studyCards.length === 0) {
     return (
       <div style={{ ...containerStyle, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-        {/* Confetti-like dots */}
         <div style={{ position: "relative", width: 88, height: 88, marginBottom: 24 }}>
           <div style={{ position: "absolute", width: 6, height: 6, borderRadius: "50%", background: T.easy, top: 2, left: 14, opacity: 0.6 }} />
           <div style={{ position: "absolute", width: 4, height: 4, borderRadius: "50%", background: T.good, top: 8, right: 10, opacity: 0.5 }} />
@@ -28,7 +48,6 @@ export default function StudyView({
           <div style={{ position: "absolute", width: 5, height: 5, borderRadius: "50%", background: T.easy, bottom: 2, right: 12, opacity: 0.6 }} />
           <div style={{ position: "absolute", width: 3, height: 3, borderRadius: "50%", background: T.done, top: 16, left: 4, opacity: 0.4 }} />
           <div style={{ position: "absolute", width: 4, height: 4, borderRadius: "50%", background: T.good, bottom: 14, right: 2, opacity: 0.5 }} />
-          {/* Main checkmark circle */}
           <div style={{
             position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
             width: 64, height: 64, borderRadius: "50%",
@@ -75,82 +94,95 @@ export default function StudyView({
       </div>
 
       {/* Tags */}
-      {(currentCard.tags || []).length > 0 && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16, maxWidth: 580, margin: "0 auto 16px auto", width: "100%" }}>
-          {currentCard.tags.map(tag => (
-            <span key={tag} style={{
-              padding: "5px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600,
-              background: T.card, color: T.textMid, border: `1px solid ${T.borderStrong}`,
-              fontFamily: T.fontBody, letterSpacing: 0.5, textTransform: "lowercase",
-              boxShadow: T.shadow1
-            }}>{tag}</span>
-          ))}
-        </div>
-      )}
-
-      <FlipCard card={currentCard} flipped={flipped} onFlip={onFlip} />
-
-      {/* Guess input (before flip) */}
-      {!flipped && !guessSubmitted && (
-        <div style={{ marginTop: 28, animation: "fadeIn 0.3s ease" }}>
-          <textarea
-            value={guess}
-            onChange={e => setGuess(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && guess.trim()) { e.preventDefault(); submitGuess(); } }}
-            placeholder="Type your answer..."
-            style={{
-              width: "100%", minHeight: 80, padding: "12px 16px", borderRadius: T.radius,
-              border: `1.5px solid ${T.border}`, fontSize: 15, lineHeight: 1.6,
-              fontFamily: T.fontBody, color: T.text, background: T.inputBg,
-              outline: "none", resize: "vertical", boxSizing: "border-box",
-              transition: "border-color 0.2s"
-            }}
-            onFocus={e => e.target.style.borderColor = T.borderStrong}
-            onBlur={e => e.target.style.borderColor = T.border}
-            autoFocus
-          />
-          <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>
-            <button onClick={skipGuess} style={{
-              padding: "9px 18px", borderRadius: T.radius, border: `1.5px solid ${T.border}`,
-              background: T.white, color: T.textMid, fontSize: 13, fontWeight: 500,
-              cursor: "pointer", fontFamily: T.fontBody
-            }}>Skip &amp; Self-Rate</button>
-            <button onClick={submitGuess} disabled={!guess.trim()} style={{
-              padding: "9px 20px", borderRadius: T.radius, border: "none",
-              background: guess.trim() ? T.done : T.bgSub,
-              color: guess.trim() ? "#fff" : T.textLight,
-              fontSize: 13, fontWeight: 600, cursor: guess.trim() ? "pointer" : "default",
-              fontFamily: T.fontBody, boxShadow: guess.trim() ? "0 2px 8px rgba(58,125,92,0.25)" : "none"
-            }}>Check Answer</button>
+      <div style={{
+        transition: cardPhase === "dismiss" ? "opacity 0.2s ease" : "none",
+        opacity: cardPhase === "dismiss" ? 0 : 1,
+        animation: cardPhase === "enter" ? "cardEnter 0.25s ease both" : "none",
+      }}>
+        {(currentCard.tags || []).length > 0 && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16, maxWidth: 580, margin: "0 auto 16px auto", width: "100%" }}>
+            {currentCard.tags.map(tag => (
+              <span key={tag} style={{
+                padding: "5px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600,
+                background: T.card, color: T.textMid, border: `1px solid ${T.borderStrong}`,
+                fontFamily: T.fontBody, letterSpacing: 0.5, textTransform: "lowercase",
+                boxShadow: T.shadow1
+              }}>{tag}</span>
+            ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* AI Chat Result (loading + result + rating) */}
-      <AiChatResult
-        guess={guess}
-        guessSubmitted={guessSubmitted}
-        aiLoading={aiLoading}
-        aiResult={aiResult}
-        ratingColors={ratingColors}
-        ratingBgs={ratingBgs}
-        onRate={handleRate}
-      />
+      {/* FlipCard with swipe-off dismiss */}
+      <div style={{
+        transition: cardPhase === "dismiss" ? "transform 0.35s cubic-bezier(0.4,0,0.2,1), opacity 0.3s ease" : "none",
+        transform: cardPhase === "dismiss" ? "translateX(-120%) translateY(40px) rotate(-8deg)" : "none",
+        opacity: cardPhase === "dismiss" ? 0 : 1,
+        animation: cardPhase === "enter" ? "cardEnter 0.3s ease both" : "none",
+      }}>
+        <FlipCard card={currentCard} flipped={flipped} onFlip={onFlip} />
+      </div>
 
-      {/* Manual rating (skipped guess) */}
-      {guessSubmitted && !aiResult && !aiLoading && (
-        <div style={{ animation: "fadeIn 0.3s ease", marginTop: 12 }}>
-          <p style={{ textAlign: "center", fontSize: 12, color: T.textLight, marginBottom: 4, fontFamily: T.fontBody }}>How well did you know this?</p>
-          <RatingButtons onRate={handleRate} />
-        </div>
-      )}
+      {/* UI below card — fades out on dismiss */}
+      <div style={{
+        transition: cardPhase === "dismiss" ? "opacity 0.2s ease" : "none",
+        opacity: cardPhase === "dismiss" ? 0 : 1,
+        animation: cardPhase === "enter" ? "cardEnter 0.25s ease both" : "none",
+      }}>
+        {/* Guess input (before flip) */}
+        {!flipped && !guessSubmitted && (
+          <div style={{ marginTop: 28, animation: "fadeIn 0.3s ease" }}>
+            <textarea
+              value={guess}
+              onChange={e => setGuess(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && guess.trim()) { e.preventDefault(); submitGuess(); } }}
+              placeholder="Type your answer..."
+              style={{
+                width: "100%", minHeight: 80, padding: "12px 16px", borderRadius: T.radius,
+                border: `1.5px solid ${T.border}`, fontSize: 15, lineHeight: 1.6,
+                fontFamily: T.fontBody, color: T.text, background: T.inputBg,
+                outline: "none", resize: "vertical", boxSizing: "border-box",
+                transition: "border-color 0.2s"
+              }}
+              onFocus={e => e.target.style.borderColor = T.borderStrong}
+              onBlur={e => e.target.style.borderColor = T.border}
+              autoFocus
+            />
+            <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>
+              <button onClick={skipGuess} style={{
+                padding: "9px 18px", borderRadius: T.radius, border: `1.5px solid ${T.border}`,
+                background: T.white, color: T.textMid, fontSize: 13, fontWeight: 500,
+                cursor: "pointer", fontFamily: T.fontBody
+              }}>Skip &amp; Self-Rate</button>
+              <button onClick={submitGuess} disabled={!guess.trim()} style={{
+                padding: "9px 20px", borderRadius: T.radius, border: "none",
+                background: guess.trim() ? T.done : T.bgSub,
+                color: guess.trim() ? "#fff" : T.textLight,
+                fontSize: 13, fontWeight: 600, cursor: guess.trim() ? "pointer" : "default",
+                fontFamily: T.fontBody, boxShadow: guess.trim() ? "0 2px 8px rgba(58,125,92,0.25)" : "none"
+              }}>Check Answer</button>
+            </div>
+          </div>
+        )}
 
-      {/* Hint text */}
-      {!flipped && !guessSubmitted && !guess && (
-        <p style={{ textAlign: "center", color: T.textLight, fontSize: 12, marginTop: 16, fontFamily: T.fontBody }}>
-          Type your answer above, or tap the card to self-rate
-        </p>
-      )}
+        {/* AI Chat Result (loading + result + rating) */}
+        <AiChatResult
+          guess={guess}
+          guessSubmitted={guessSubmitted}
+          aiLoading={aiLoading}
+          aiResult={aiResult}
+          ratingColors={ratingColors}
+          ratingBgs={ratingBgs}
+          onRate={wrappedRate}
+        />
+
+        {/* Hint text */}
+        {!flipped && !guessSubmitted && !guess && (
+          <p style={{ textAlign: "center", color: T.textLight, fontSize: 12, marginTop: 16, fontFamily: T.fontBody }}>
+            Type your answer above, or tap the card to self-rate
+          </p>
+        )}
+      </div>
 
       {/* Flip hint popup */}
       {showFlipHint && (

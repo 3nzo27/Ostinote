@@ -4,9 +4,21 @@ import useTheme from "../../theme/useTheme.js";
 export default function FlipCard({ card, flipped, onFlip, style: wrapStyle = {} }) {
   const { T } = useTheme();
   const [cardHeight, setCardHeight] = useState(200);
+  const [skipTransition, setSkipTransition] = useState(false);
   const frontRef = useRef(null);
   const backRef = useRef(null);
+  const prevCardId = useRef(card?.id);
   const CARD_MIN_H = 340;
+
+  // When the card changes, suppress the flip transition so the new card appears front-side instantly
+  useEffect(() => {
+    if (card?.id !== prevCardId.current) {
+      prevCardId.current = card?.id;
+      setSkipTransition(true);
+      const timer = setTimeout(() => setSkipTransition(false), 50);
+      return () => clearTimeout(timer);
+    }
+  }, [card]);
 
   useEffect(() => {
     const measure = () => {
@@ -72,7 +84,7 @@ export default function FlipCard({ card, flipped, onFlip, style: wrapStyle = {} 
     <div role="button" tabIndex={0} aria-label={flipped ? "Flashcard showing back side, tap to flip" : "Flashcard showing front side, tap to flip"} onClick={onFlip} style={{ perspective: 900, cursor: "pointer", width: "100%", maxWidth: 580, margin: "0 auto", ...wrapStyle }}>
       <div style={{
         position: "relative", width: "100%", height: cardHeight,
-        transition: "transform 0.55s cubic-bezier(0.4,0,0.2,1)",
+        transition: skipTransition ? "none" : "transform 0.55s cubic-bezier(0.4,0,0.2,1)",
         transformStyle: "preserve-3d", transform: flipped ? "rotateY(180deg)" : "rotateY(0)"
       }}>
         <div ref={frontRef} style={{ ...faceBase, background: T.card }}>{header("Front")}{renderSide(card.front)}</div>
