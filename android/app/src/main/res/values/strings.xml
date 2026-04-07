@@ -1,0 +1,6 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="title_activity_main">Ostinote</string>
+    <string name="package_name">com.ostinote.app</string>
+    <string name="custom_url_scheme">com.ostinote.app</string>
+</resources>
