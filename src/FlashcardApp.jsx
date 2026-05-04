@@ -14,6 +14,7 @@ import DirectedStudyConfigView from "./views/DirectedStudyConfigView/DirectedStu
 import DirectedStudySessionView from "./views/DirectedStudySessionView/DirectedStudySessionView.jsx";
 import DirectedStudyResultsView from "./views/DirectedStudyResultsView/DirectedStudyResultsView.jsx";
 import SettingsView from "./views/SettingsView/SettingsView.jsx";
+import ProfileView from "./views/ProfileView/ProfileView.jsx";
 import { gradeAnswer } from "./utils/aiGrader.js";
 import Onboarding from "./components/Onboarding/Onboarding.jsx";
 import HelpModal from "./components/HelpModal/HelpModal.jsx";
@@ -49,8 +50,15 @@ export default function FlashcardApp() {
     } catch { return true; }
   });
 
-  // localStorage persistence
-  useEffect(() => { localStorage.setItem("ostinote_decks", JSON.stringify(decks)); }, [decks]);
+  // localStorage persistence — debounced to avoid blocking UI on every change
+  const localSaveRef = useRef(null);
+  useEffect(() => {
+    clearTimeout(localSaveRef.current);
+    localSaveRef.current = setTimeout(() => {
+      localStorage.setItem("ostinote_decks", JSON.stringify(decks));
+    }, 300);
+    return () => clearTimeout(localSaveRef.current);
+  }, [decks]);
   useEffect(() => { localStorage.setItem("ostinote_hideFlipHint", JSON.stringify(hideFlipHintForever)); }, [hideFlipHintForever]);
   useEffect(() => { localStorage.setItem("ostinote_aiSettings", JSON.stringify(aiSettings)); }, [aiSettings]);
 
@@ -556,6 +564,10 @@ Respond ONLY with valid JSON, no markdown backticks, in this exact format:
 
   if (view === "settings") {
     return <SettingsView aiSettings={aiSettings} setAiSettings={setAiSettings} syncStatus={syncStatus} onNavigate={onNavigate} onHelpOpen={openHelp} onReplayOnboarding={replayOnboarding} />;
+  }
+
+  if (view === "profile") {
+    return <ProfileView syncStatus={syncStatus} onNavigate={onNavigate} onHelpOpen={openHelp} />;
   }
 
   return null;

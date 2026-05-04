@@ -1,4 +1,17 @@
 node_modules
 dist
+dist-electron
+release
 .DS_Store
 *.local
+
+# Stray legacy single-file app (kept locally, not committed)
+flashcards-3.jsx
+
+# Capacitor build artifacts
+ios/App/build
+ios/App/Pods
+ios/App/Podfile.lock
+android/.gradle
+android/local.properties
+android/app/build

@@ -47,6 +47,7 @@ const GUIDES = [
       { heading: "Text cards", body: "The simplest type. Type a question on the front and the answer on the back. Great for definitions, vocabulary, and factual recall." },
       { heading: "Drawing cards", body: "Tap the pencil icon to open the drawing canvas. Sketch diagrams, label anatomy, draw chemical structures — anything visual. You can combine drawings with text." },
       { heading: "Audio cards", body: "Tap the microphone icon to record audio. Perfect for language pronunciation, music theory, or anything you need to hear. Recordings play back with a single tap." },
+      { heading: "Drag & drop your own files", body: "On desktop, drag any image (PNG, JPG) or audio file (MP3, WAV) from your computer onto the card editor. The file is added to whichever side is currently active — front or back." },
       { heading: "Mixing media", body: "Each side of a card can have text, a drawing, AND audio all at once. For example: front has a text question, back has a drawing explanation with an audio pronunciation." },
     ],
   },

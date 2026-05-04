@@ -57,7 +57,7 @@ export default function FlipCard({ card, flipped, onFlip, style: wrapStyle = {} 
             maxWidth: textOnly ? "90%" : "100%",
           }}>{side.text}</div>
         )}
-        {hasDrawing && <img src={side.drawing} alt="" style={{ width: "100%", borderRadius: 6, border: `1px solid ${T.border}`, display: "block" }} />}
+        {hasDrawing && <img src={side.drawing} alt="" style={{ width: "100%", borderRadius: 6, border: `1px solid ${T.border}`, display: "block", background: T.canvasBg }} />}
         {hasAudio && <audio src={side.audio} controls style={{ width: "100%", marginTop: 4, display: "block" }} />}
         {empty && (
           <div style={{ color: T.textLight, fontStyle: "italic", fontSize: 14, fontFamily: T.fontBody }}>Empty side</div>

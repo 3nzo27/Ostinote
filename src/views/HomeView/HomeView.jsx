@@ -1,3 +1,4 @@
+import { useState, useRef } from "react";
 import useTheme from "../../theme/useTheme.js";
 import NavBar from "../../components/NavBar/NavBar.jsx";
 import DeleteConfirmModal from "../../components/DeleteConfirmModal/DeleteConfirmModal.jsx";
@@ -6,7 +7,12 @@ import OnboardingTooltip from "../../components/Onboarding/OnboardingTooltip.jsx
 const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 export default function HomeView({ decks, calOffset, setCalOffset, confirmDeleteId, setConfirmDeleteId, deleteDeck, onNavigate, onSelectDeck, exportData, importData, onHelpOpen }) {
-  const { T } = useTheme();
+  const { T, darkMode } = useTheme();
+  const [hoveredDay, setHoveredDay] = useState(null);
+  const [pinnedDay, setPinnedDay] = useState(null);
+  const [tooltipVisible, setTooltipVisible] = useState(false);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+  const hoverTimeout = useRef(null);
   const containerStyle = { maxWidth: 640, margin: "0 auto", padding: "calc(24px + var(--sat)) calc(16px + var(--sar)) calc(24px + var(--sab)) calc(16px + var(--sal))", minHeight: "100vh", fontFamily: T.fontBody, background: T.bg };
 
   const totalDue = decks.reduce((sum, d) => sum + d.cards.filter(c => c.nextReview <= Date.now()).length, 0);
@@ -19,13 +25,20 @@ export default function HomeView({ decks, calOffset, setCalOffset, confirmDelete
     const firstDay = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const today = (offset === 0) ? now.getDate() : -1;
-    const allCards = decks.flatMap(d => d.cards);
     const dueCounts = {};
     for (let day = 1; day <= daysInMonth; day++) {
       const dayStart = new Date(year, month, day).getTime();
       const dayEnd = new Date(year, month, day + 1).getTime();
-      const dueCount = allCards.filter(c => c.nextReview >= dayStart && c.nextReview < dayEnd).length;
-      if (dueCount > 0) dueCounts[day] = dueCount;
+      let total = 0;
+      const deckBreakdown = [];
+      for (const deck of decks) {
+        const count = deck.cards.filter(c => c.nextReview >= dayStart && c.nextReview < dayEnd).length;
+        if (count > 0) {
+          total += count;
+          deckBreakdown.push({ name: deck.name, count });
+        }
+      }
+      if (total > 0) dueCounts[day] = { total, decks: deckBreakdown };
     }
     return { year, month, firstDay, daysInMonth, today, dueCounts };
   };
@@ -43,6 +56,11 @@ export default function HomeView({ decks, calOffset, setCalOffset, confirmDelete
 
   return (
     <div style={containerStyle}>
+      {pinnedDay !== null && (
+        <div onClick={() => setPinnedDay(null)} style={{
+          position: "fixed", inset: 0, zIndex: 999, cursor: "default"
+        }} />
+      )}
       <NavBar view="home" onNavigate={onNavigate} onHelpOpen={onHelpOpen} />
 
       <div style={{ marginBottom: 24 }}>
@@ -106,7 +124,7 @@ export default function HomeView({ decks, calOffset, setCalOffset, confirmDelete
               </button>
             </div>
           </div>
-          <div role="grid" aria-label={`Review calendar for ${monthNames[cal.month]} ${cal.year}`} style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2, textAlign: "center" }}>
+          <div role="grid" aria-label={`Review calendar for ${monthNames[cal.month]} ${cal.year}`} style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2, textAlign: "center", overflow: "visible" }}>
             {["S","M","T","W","T","F","S"].map((d, i) => (
               <div key={i} style={{ fontSize: 10, fontWeight: 600, color: T.textLight, fontFamily: T.fontBody, padding: "4px 0" }}>{d}</div>
             ))}
@@ -114,27 +132,114 @@ export default function HomeView({ decks, calOffset, setCalOffset, confirmDelete
             {Array.from({ length: cal.daysInMonth }, (_, i) => {
               const day = i + 1;
               const isToday = day === cal.today;
-              const dueCount = cal.dueCounts[day] || 0;
+              const dueData = cal.dueCounts[day];
+              const dueCount = dueData ? dueData.total : 0;
+              const isPinned = pinnedDay === day;
               return (
                 <div key={day} style={{
-                  position: "relative", padding: "6px 0", borderRadius: 8,
-                  background: isToday ? T.text : "transparent",
-                  color: isToday ? T.card : T.text,
+                  position: "relative", padding: "6px 0 10px", borderRadius: 8,
+                  background: isPinned
+                    ? (darkMode ? (isToday ? T.text : `${T.text}12`) : "#e0ddd8")
+                    : (isToday ? T.text : "transparent"),
+                  color: isPinned && !darkMode
+                    ? T.text
+                    : (isToday ? T.card : T.text),
                   fontSize: 12, fontWeight: isToday ? 700 : 400,
-                  fontFamily: T.fontBody, cursor: "default"
-                }}>
+                  fontFamily: T.fontBody, cursor: dueCount > 0 ? "pointer" : "default",
+                  overflow: "visible",
+                  boxShadow: isPinned
+                    ? `inset 0 2px 4px rgba(0,0,0,${isToday ? "0.3" : "0.1"})`
+                    : "none",
+                  transform: isPinned ? "scale(0.95)" : "scale(1)",
+                  transition: "transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease"
+                }}
+                  onClick={e => {
+                    if (!dueData) return;
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setTooltipPos({ x: rect.left + rect.width / 2, y: rect.bottom + 6 });
+                    if (isPinned) {
+                      setPinnedDay(null);
+                    } else {
+                      setPinnedDay(day);
+                      setHoveredDay(day);
+                      setTooltipVisible(true);
+                    }
+                  }}
+                  onMouseEnter={e => {
+                    if (!dueData || isPinned) return;
+                    clearTimeout(hoverTimeout.current);
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setTooltipPos({ x: rect.left + rect.width / 2, y: rect.bottom + 6 });
+                    setHoveredDay(day);
+                    requestAnimationFrame(() => setTooltipVisible(true));
+                  }}
+                  onMouseLeave={() => {
+                    if (isPinned) return;
+                    setTooltipVisible(false);
+                    hoverTimeout.current = setTimeout(() => setHoveredDay(null), 250);
+                  }}
+                >
                   {day}
                   {dueCount > 0 && (
                     <div style={{
-                      position: "absolute", bottom: 1, left: "50%", transform: "translateX(-50%)",
+                      position: "absolute", bottom: 3, left: "50%", transform: "translateX(-50%)",
                       width: 4, height: 4, borderRadius: "50%",
-                      background: isToday ? T.card : T.due
+                      background: isToday && !(isPinned && !darkMode) ? T.card : T.due
                     }} />
                   )}
                 </div>
               );
             })}
           </div>
+
+          {/* Single tooltip rendered outside all scaled cells */}
+          {(hoveredDay !== null || pinnedDay !== null) && (() => {
+            const activeDay = pinnedDay ?? hoveredDay;
+            const activeData = cal.dueCounts[activeDay];
+            if (!activeData) return null;
+            const isActive = (tooltipVisible || pinnedDay !== null);
+            return (
+              <div
+                onMouseEnter={() => {
+                  if (pinnedDay !== null) return;
+                  clearTimeout(hoverTimeout.current);
+                  setTooltipVisible(true);
+                }}
+                onMouseLeave={() => {
+                  if (pinnedDay !== null) return;
+                  setTooltipVisible(false);
+                  hoverTimeout.current = setTimeout(() => setHoveredDay(null), 250);
+                }}
+                style={{
+                  position: "fixed",
+                  left: tooltipPos.x, top: tooltipPos.y,
+                  transform: "translateX(-50%)",
+                  background: T.text, color: T.card, borderRadius: 8,
+                  padding: "8px 12px", fontSize: 12, fontFamily: T.fontBody,
+                  boxShadow: "0 4px 16px rgba(0,0,0,0.18)", zIndex: 1000,
+                  pointerEvents: "auto",
+                  minWidth: 120, maxWidth: 220, whiteSpace: "nowrap",
+                  opacity: isActive ? 1 : 0,
+                  transition: "opacity 0.2s ease",
+                }}
+              >
+                <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 11, opacity: 0.7 }}>
+                  {monthNames[cal.month]} {activeDay} — {activeData.total} card{activeData.total !== 1 ? "s" : ""} due
+                </div>
+                {activeData.decks.slice(0, 3).map((d, idx) => (
+                  <div key={idx} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "2px 0" }}>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</span>
+                    <span style={{ fontWeight: 600, flexShrink: 0 }}>{d.count}</span>
+                  </div>
+                ))}
+                {activeData.decks.length > 3 && (
+                  <div style={{ fontSize: 11, opacity: 0.5, paddingTop: 2 }}>
+                    +{activeData.decks.length - 3} more
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </>)}
 
         {/* Recent Decks */}

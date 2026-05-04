@@ -15,6 +15,14 @@ export default function DirectedStudySessionView({
   const [cardPhase, setCardPhase] = useState("idle");
   const phaseTimer = useRef(null);
   const prevIndex = useRef(dsIndex);
+  const guessInputRef = useRef(null);
+
+  useEffect(() => {
+    const el = guessInputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = el.scrollHeight + "px";
+  }, [guess, flipped, guessSubmitted, dsIndex]);
 
   useEffect(() => {
     if (dsIndex !== prevIndex.current) {
@@ -124,16 +132,24 @@ export default function DirectedStudySessionView({
       }}>
         {/* Guess input */}
         {!flipped && !guessSubmitted && (
-          <div style={{ marginTop: 28, animation: "fadeIn 0.3s ease" }}>
-            <textarea value={guess} onChange={e => setGuess(e.target.value)}
+          <div style={{ marginTop: 28, animation: "fadeIn 0.3s ease", maxWidth: 580, margin: "28px auto 0 auto", width: "100%" }}>
+            <textarea
+              ref={guessInputRef}
+              value={guess}
+              onChange={e => setGuess(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && guess.trim()) { e.preventDefault(); submitGuess(); } }}
               placeholder="Type your answer..."
+              rows={1}
               style={{
-                width: "100%", minHeight: 80, padding: "12px 16px", borderRadius: T.radius,
-                border: `1.5px solid ${T.border}`, fontSize: 15, lineHeight: 1.6,
+                width: "100%", padding: "10px 16px", borderRadius: 20,
+                border: `1.5px solid ${T.border}`, fontSize: 15, lineHeight: 1.5,
                 fontFamily: T.fontBody, color: T.text, background: T.inputBg,
-                outline: "none", resize: "vertical", boxSizing: "border-box"
+                outline: "none", resize: "none", boxSizing: "border-box",
+                transition: "border-color 0.2s",
+                display: "block", overflow: "hidden"
               }}
+              onFocus={e => e.target.style.borderColor = T.borderStrong}
+              onBlur={e => e.target.style.borderColor = T.border}
               autoFocus
             />
             <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import useTheme from "../../theme/useTheme.js";
 import HoverMenu from "./HoverMenu.jsx";
 
-export default function DrawingCanvas({ dataUrl, onChange, width = 540, height = 340 }) {
+export default function DrawingCanvas({ dataUrl, onChange, width = 540, height = 340, children, drawingDisabled = false }) {
   const { T } = useTheme();
   const canvasRef = useRef(null);
   const overlayRef = useRef(null);
@@ -305,20 +305,33 @@ export default function DrawingCanvas({ dataUrl, onChange, width = 540, height =
       {/* Canvas area */}
       <div style={{ position: "relative", width: "100%", borderRadius: T.radius, overflow: "hidden", border: `1.5px solid ${T.border}` }}>
         <canvas ref={canvasRef} width={width} height={height}
-          onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
-          onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw}
+          onMouseDown={drawingDisabled ? undefined : startDraw}
+          onMouseMove={drawingDisabled ? undefined : draw}
+          onMouseUp={drawingDisabled ? undefined : endDraw}
+          onMouseLeave={drawingDisabled ? undefined : endDraw}
+          onTouchStart={drawingDisabled ? undefined : startDraw}
+          onTouchMove={drawingDisabled ? undefined : draw}
+          onTouchEnd={drawingDisabled ? undefined : endDraw}
           style={{
             width: "100%", height: "auto", aspectRatio: `${width}/${height}`,
-            background: T.canvasBg, cursor: cursorStyle, touchAction: "none",
-            boxSizing: "border-box", display: "block"
+            background: T.canvasBg, cursor: drawingDisabled ? "default" : cursorStyle, touchAction: "none",
+            boxSizing: "border-box", display: "block",
+            pointerEvents: drawingDisabled ? "none" : "auto"
           }} />
         <canvas ref={overlayRef} width={width} height={height}
-          onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
-          onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw}
+          onMouseDown={drawingDisabled ? undefined : startDraw}
+          onMouseMove={drawingDisabled ? undefined : draw}
+          onMouseUp={drawingDisabled ? undefined : endDraw}
+          onMouseLeave={drawingDisabled ? undefined : endDraw}
+          onTouchStart={drawingDisabled ? undefined : startDraw}
+          onTouchMove={drawingDisabled ? undefined : draw}
+          onTouchEnd={drawingDisabled ? undefined : endDraw}
           style={{
             position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
-            cursor: cursorStyle, touchAction: "none", pointerEvents: isShapeTool ? "auto" : "none"
+            cursor: drawingDisabled ? "default" : cursorStyle, touchAction: "none",
+            pointerEvents: drawingDisabled ? "none" : (isShapeTool ? "auto" : "none")
           }} />
+        {children}
       </div>
     </div>
   );
