@@ -6,17 +6,32 @@ import { deleteDoc, doc } from "firebase/firestore";
 import { deleteUser } from "firebase/auth";
 import { db } from "../../firebase.js";
 
+// Cloud sync / account features are not ready for public use yet. Set this
+// back to `true` (and remove the placeholder UI below) to re-enable.
+const AUTH_ENABLED = false;
+
 export default function ProfileView({ syncStatus, onNavigate, onHelpOpen }) {
   const { T } = useTheme();
-  const { user, loading, signInWithGoogle, signInWithApple, signOut } = useAuth();
+  const auth = useAuth();
+  // When auth is disabled, force the "not signed in" view regardless of state
+  const user = AUTH_ENABLED ? auth.user : null;
+  const loading = AUTH_ENABLED ? auth.loading : false;
+  const { signInWithGoogle, signInWithApple, signOut } = auth;
   const [authError, setAuthError] = useState(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [previewToast, setPreviewToast] = useState(null);
+
+  const showComingSoonToast = () => {
+    setPreviewToast("Cloud sync isn't ready yet — coming in a future update.");
+    setTimeout(() => setPreviewToast(null), 2400);
+  };
 
   const containerStyle = { maxWidth: 640, margin: "0 auto", padding: "calc(24px + var(--sat)) calc(16px + var(--sar)) calc(24px + var(--sab)) calc(16px + var(--sal))", minHeight: "100vh", fontFamily: T.fontBody, background: T.bg };
 
   const handleGoogleSignIn = async () => {
+    if (!AUTH_ENABLED) return showComingSoonToast();
     setAuthError(null);
     try { await signInWithGoogle(); } catch (err) {
       if (err.code !== "auth/popup-closed-by-user") setAuthError(err.message);
@@ -24,6 +39,7 @@ export default function ProfileView({ syncStatus, onNavigate, onHelpOpen }) {
   };
 
   const handleAppleSignIn = async () => {
+    if (!AUTH_ENABLED) return showComingSoonToast();
     setAuthError(null);
     try { await signInWithApple(); } catch (err) {
       if (err.code !== "auth/popup-closed-by-user") setAuthError(err.message);
@@ -31,6 +47,7 @@ export default function ProfileView({ syncStatus, onNavigate, onHelpOpen }) {
   };
 
   const handleSignOut = async () => {
+    if (!AUTH_ENABLED) return showComingSoonToast();
     setAuthError(null);
     try { await signOut(); } catch (err) { setAuthError(err.message); }
   };
@@ -146,36 +163,78 @@ export default function ProfileView({ syncStatus, onNavigate, onHelpOpen }) {
                 </div>
                 <div>
                   <div style={{ fontSize: 16, fontWeight: 700, color: T.text, fontFamily: T.fontBody, marginBottom: 2 }}>
-                    Not signed in
+                    {AUTH_ENABLED ? "Not signed in" : "Local-only mode"}
                   </div>
                   <div style={{ fontSize: 13, color: T.textMid, fontFamily: T.fontBody }}>
-                    Local data only
+                    {AUTH_ENABLED ? "Local data only" : "Your decks are stored on this device"}
                   </div>
                 </div>
               </div>
-              <p style={{ fontSize: 12, color: T.textMid, fontFamily: T.fontBody, marginBottom: 14, lineHeight: 1.5 }}>
-                Sign in to sync your decks across devices. Your data is stored securely in the cloud.
-              </p>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button onClick={handleGoogleSignIn} style={{
-                  padding: "12px 20px", borderRadius: T.radius, border: `1.5px solid ${T.border}`,
-                  background: T.card, color: T.text, fontWeight: 600, fontSize: 13,
-                  cursor: "pointer", fontFamily: T.fontBody, transition: "all 0.15s",
-                  display: "flex", alignItems: "center", gap: 8, flex: "1 1 0", justifyContent: "center"
+              {AUTH_ENABLED ? (
+                <p style={{ fontSize: 12, color: T.textMid, fontFamily: T.fontBody, marginBottom: 14, lineHeight: 1.5 }}>
+                  Sign in to sync your decks across devices. Your data is stored securely in the cloud.
+                </p>
+              ) : (
+                <div style={{
+                  display: "flex", alignItems: "flex-start", gap: 10,
+                  padding: "12px 14px", borderRadius: T.radius,
+                  background: `${T.hard || "#c47f2a"}10`,
+                  border: `1px solid ${T.hard || "#c47f2a"}30`,
+                  marginBottom: 14
                 }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.hard || "#c47f2a"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
+                    <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+                  </svg>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: T.text, fontFamily: T.fontBody, marginBottom: 2 }}>
+                      Cloud sync isn't ready yet
+                    </div>
+                    <div style={{ fontSize: 11, color: T.textMid, fontFamily: T.fontBody, lineHeight: 1.45 }}>
+                      Sign-in is shown as a preview. Your decks are saved on this device only — use Export Backup on the home screen to save a copy.
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button onClick={handleGoogleSignIn}
+                  aria-disabled={!AUTH_ENABLED}
+                  title={!AUTH_ENABLED ? "Coming soon" : undefined}
+                  style={{
+                    position: "relative",
+                    padding: "12px 20px", borderRadius: T.radius, border: `1.5px solid ${T.border}`,
+                    background: T.card, color: T.text, fontWeight: 600, fontSize: 13,
+                    cursor: AUTH_ENABLED ? "pointer" : "not-allowed",
+                    fontFamily: T.fontBody, transition: "all 0.15s",
+                    display: "flex", alignItems: "center", gap: 8, flex: "1 1 0", justifyContent: "center",
+                    opacity: AUTH_ENABLED ? 1 : 0.55
+                  }}>
                   <svg width="16" height="16" viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18A11.96 11.96 0 0 0 0 12c0 1.94.46 3.77 1.28 5.4l3.56-2.77.01-.54z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
                   Google
                 </button>
-                <button onClick={handleAppleSignIn} style={{
-                  padding: "12px 20px", borderRadius: T.radius, border: `1.5px solid ${T.border}`,
-                  background: T.card, color: T.text, fontWeight: 600, fontSize: 13,
-                  cursor: "pointer", fontFamily: T.fontBody, transition: "all 0.15s",
-                  display: "flex", alignItems: "center", gap: 8, flex: "1 1 0", justifyContent: "center"
-                }}>
+                <button onClick={handleAppleSignIn}
+                  aria-disabled={!AUTH_ENABLED}
+                  title={!AUTH_ENABLED ? "Coming soon" : undefined}
+                  style={{
+                    position: "relative",
+                    padding: "12px 20px", borderRadius: T.radius, border: `1.5px solid ${T.border}`,
+                    background: T.card, color: T.text, fontWeight: 600, fontSize: 13,
+                    cursor: AUTH_ENABLED ? "pointer" : "not-allowed",
+                    fontFamily: T.fontBody, transition: "all 0.15s",
+                    display: "flex", alignItems: "center", gap: 8, flex: "1 1 0", justifyContent: "center",
+                    opacity: AUTH_ENABLED ? 1 : 0.55
+                  }}>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M17.05 20.28c-.98.95-2.05.88-3.08.4-1.09-.5-2.08-.48-3.24 0-1.44.62-2.2.44-3.06-.4C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>
                   Apple
                 </button>
               </div>
+              {!AUTH_ENABLED && (
+                <div style={{
+                  marginTop: 10, fontSize: 11, color: T.textLight, fontFamily: T.fontBody,
+                  textAlign: "center", letterSpacing: 0.3
+                }}>
+                  Sign-in providers shown as preview · not yet functional
+                </div>
+              )}
             </div>
           )}
           {authError && (
@@ -252,6 +311,24 @@ export default function ProfileView({ syncStatus, onNavigate, onHelpOpen }) {
               }}>{deleting ? "Deleting..." : "Delete Account"}</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Coming-soon toast for placeholder sign-in clicks */}
+      {previewToast && (
+        <div style={{
+          position: "fixed", bottom: "calc(28px + var(--sab))", left: "50%",
+          transform: "translateX(-50%)", zIndex: 200,
+          background: T.text, color: T.card,
+          padding: "10px 18px", borderRadius: 999,
+          fontSize: 13, fontWeight: 500, fontFamily: T.fontBody,
+          boxShadow: T.shadow2, animation: "fadeIn 0.2s ease",
+          display: "flex", alignItems: "center", gap: 8, maxWidth: "calc(100% - 32px)"
+        }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+          </svg>
+          {previewToast}
         </div>
       )}
     </div>

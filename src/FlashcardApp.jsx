@@ -16,6 +16,8 @@ import DirectedStudyResultsView from "./views/DirectedStudyResultsView/DirectedS
 import SettingsView from "./views/SettingsView/SettingsView.jsx";
 import ProfileView from "./views/ProfileView/ProfileView.jsx";
 import { gradeAnswer } from "./utils/aiGrader.js";
+import { gradeWithLocal } from "./utils/webllm.js";
+import { quickGrade } from "./utils/quickGrade.js";
 import Onboarding from "./components/Onboarding/Onboarding.jsx";
 import HelpModal from "./components/HelpModal/HelpModal.jsx";
 
@@ -33,8 +35,18 @@ export default function FlashcardApp() {
   });
 
   const [aiSettings, setAiSettings] = useState(() => {
-    try { const s = localStorage.getItem("ostinote_aiSettings"); if (s) return JSON.parse(s); } catch {}
-    return { provider: "anthropic", model: "claude-sonnet-4-20250514", apiKey: "" };
+    const defaults = {
+      provider: "anthropic",
+      model: "claude-haiku-4-5",
+      apiKey: "",
+      useLocal: false,
+      localModelId: "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+    };
+    try {
+      const s = localStorage.getItem("ostinote_aiSettings");
+      if (s) return { ...defaults, ...JSON.parse(s) };
+    } catch {}
+    return defaults;
   });
 
   const [syncStatus, setSyncStatus] = useState("idle"); // idle | syncing | synced | error
@@ -236,7 +248,16 @@ export default function FlashcardApp() {
         }).join("\n")}`
       : "";
 
-    const prompt = `You are a warm, encouraging teacher grading a student's flashcard recall attempt. Your goal is to be honest about accuracy while always being supportive and positive. Acknowledge what the student got right before addressing what they missed. Even when the answer is completely wrong, find something constructive to say — perhaps they'll get it next time, or remind them that the attempt itself strengthens memory. Use a conversational, uplifting tone like a mentor who genuinely believes in their student.
+    const prompt = `You are a warm, encouraging teacher grading a flashcard answer. Be honest about accuracy while always staying supportive and positive.
+
+CRITICAL VOICE: Address the user DIRECTLY using "you" / "your" in your explanation. Do NOT write "the student", "they", "the user", or any third-person reference — speak to them, not about them. Even when the answer is wrong, find something constructive to say to them: that attempts strengthen memory, that they'll get it next time, etc.
+
+Examples of the right voice:
+✓ "You got the date right but missed the year."
+✓ "Nice — your spelling was spot on."
+✓ "Close, but the answer is 'Madrid', not 'Madrigal'. You'll get it next time."
+✗ "The student got the date right..."  (third person — wrong)
+✗ "They were close..."  (third person — wrong)
 
 GRADING RULES:
 - Ignore differences in whitespace, trailing spaces, capitalization, and punctuation unless a tag specifically requires exactness (like "spelling").
@@ -259,15 +280,34 @@ Rate on this scale:
 4 = "Easy" — correct and fairly complete, only minor differences in wording or small details missing
 5 = "Perfect" — demonstrates full understanding, matches the correct answer in meaning AND completeness
 
-Keep your explanation to 1-2 sentences. Be specific about what they got right or what's missing.${cardTags.length > 0 ? ` Mention the tag-specific criteria you applied (e.g. "spelling was accurate" or "the exact date was off").` : ""} Stay warm and encouraging even when strict.
+Keep your explanation to 1-2 sentences, addressed to "you". Be specific about what you got right or what's missing.${cardTags.length > 0 ? ` Mention the tag-specific criteria you applied (e.g. "your spelling was accurate" or "the exact date was off — you said X").` : ""} Stay warm and encouraging even when strict.
 
 Respond ONLY with valid JSON, no markdown backticks, in this exact format:
-{"rating": <number>, "label": "<Forgot|Hard|Good|Easy|Perfect>", "explanation": "<1-2 sentence warm explanation>"}`;
+{"rating": <number>, "label": "<Forgot|Hard|Good|Easy|Perfect>", "explanation": "<1-2 sentence warm explanation, addressed to 'you'>"}`;
 
     try {
-      if (!aiSettings.apiKey) throw new Error("No API key");
-      const parsed = await gradeAnswer(aiSettings, prompt);
-      setAiResult(parsed);
+      // Deterministic short-circuit: clear-cut short factual answers
+      // (numbers, dates, single tokens) bypass the AI entirely.
+      const quick = quickGrade({ correctAnswer: actualAnswer, studentAnswer: guess });
+      if (quick) {
+        setAiResult(quick);
+        setAiLoading(false);
+        return;
+      }
+
+      if (aiSettings.useLocal) {
+        const parsed = await gradeWithLocal({
+          modelId: aiSettings.localModelId,
+          correctAnswer: actualAnswer,
+          studentAnswer: guess,
+          tags: cardTags,
+        });
+        setAiResult({ ...parsed, source: "local" });
+      } else {
+        if (!aiSettings.apiKey) throw new Error("No API key");
+        const parsed = await gradeAnswer(aiSettings, prompt);
+        setAiResult({ ...parsed, source: "cloud" });
+      }
     } catch (err) {
       console.error("AI grading error:", err);
       setAiResult({ rating: 3, label: "Good", explanation: "Could not reach AI grader. Please rate manually." });

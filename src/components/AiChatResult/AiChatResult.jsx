@@ -71,6 +71,39 @@ export default function AiChatResult({ guess, aiResult, aiLoading, guessSubmitte
               }}>
                 {aiResult.label}
               </div>
+              {aiResult.source === "local" && (
+                <div title="Graded on-device" style={{
+                  display: "inline-flex", alignItems: "center", gap: 4,
+                  padding: "2px 7px", borderRadius: 10,
+                  background: `${T.perfect}15`, color: T.perfect,
+                  fontSize: 10, fontWeight: 700, fontFamily: T.fontBody,
+                  letterSpacing: 0.4, textTransform: "uppercase"
+                }}>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                  </svg>
+                  Local
+                </div>
+              )}
+              {aiResult.source === "deterministic" && (
+                <div title="Instant exact-match grading (no AI needed)" style={{
+                  display: "inline-flex", alignItems: "center", gap: 4,
+                  padding: "2px 7px", borderRadius: 10,
+                  background: `${T.easy}15`, color: T.easy,
+                  fontSize: 10, fontWeight: 700, fontFamily: T.fontBody,
+                  letterSpacing: 0.4, textTransform: "uppercase"
+                }}>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                  Instant
+                </div>
+              )}
+              {aiResult.tokensPerSec != null && (
+                <span style={{ fontSize: 10, color: T.textLight, fontFamily: T.fontBody }}>
+                  {(aiResult.ms / 1000).toFixed(1)}s
+                </span>
+              )}
             </div>
             <p style={{ fontSize: 14, lineHeight: 1.6, color: T.text, fontFamily: T.fontBody, margin: 0 }}>
               {aiResult.explanation}

@@ -2,6 +2,7 @@ import { useState } from "react";
 import useTheme from "../../theme/useTheme.js";
 import NavBar from "../../components/NavBar/NavBar.jsx";
 import { PROVIDERS } from "../../utils/aiGrader.js";
+import LocalAILab from "../../components/LocalAILab/LocalAILab.jsx";
 
 export default function SettingsView({ aiSettings, setAiSettings, syncStatus, onNavigate, onHelpOpen, onReplayOnboarding }) {
   const { T, darkMode, setDarkMode } = useTheme();
@@ -124,17 +125,46 @@ export default function SettingsView({ aiSettings, setAiSettings, syncStatus, on
         {/* Model Selection */}
         {sectionBox(<>
           <label style={labelStyle}>Model</label>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {provider.models.map(m => (
-              <button key={m} onClick={() => updateSetting("model", m)} style={{
-                padding: "8px 14px", borderRadius: T.radius, cursor: "pointer",
-                border: aiSettings.model === m ? `2px solid ${T.good}` : `1.5px solid ${T.border}`,
-                background: aiSettings.model === m ? T.goodBg : T.card,
-                color: aiSettings.model === m ? T.good : T.textMid,
-                fontWeight: 500, fontSize: 12, fontFamily: T.fontBody,
-                transition: "all 0.15s"
-              }}>{m}</button>
-            ))}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {provider.models.map(m => {
+              // Backward compat: aiSettings.model may be a string ID (current shape)
+              // or in old data, just the raw string. Always compare ID.
+              const id = typeof m === "string" ? m : m.id;
+              const name = typeof m === "string" ? m : m.name;
+              const note = typeof m === "string" ? null : m.note;
+              const recommended = typeof m === "string" ? false : m.recommended;
+              const selected = aiSettings.model === id;
+              return (
+                <button key={id} onClick={() => updateSetting("model", id)} style={{
+                  position: "relative",
+                  padding: "10px 14px", borderRadius: T.radius, cursor: "pointer",
+                  border: selected ? `2px solid ${T.good}` : `1.5px solid ${T.border}`,
+                  background: selected ? T.goodBg : T.card,
+                  color: selected ? T.good : T.text,
+                  fontWeight: 600, fontSize: 13, fontFamily: T.fontBody,
+                  transition: "all 0.15s",
+                  textAlign: "left", minWidth: 160, flex: "1 1 0"
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span>{name}</span>
+                    {recommended && (
+                      <span style={{
+                        fontSize: 9, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase",
+                        padding: "1px 6px", borderRadius: 3,
+                        background: selected ? `${T.good}30` : `${T.good}20`,
+                        color: T.good
+                      }}>Rec</span>
+                    )}
+                  </div>
+                  {note && (
+                    <div style={{
+                      fontSize: 11, fontWeight: 400, marginTop: 2,
+                      color: selected ? T.good : T.textLight
+                    }}>{note}</div>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </>)}
 
@@ -195,6 +225,20 @@ export default function SettingsView({ aiSettings, setAiSettings, syncStatus, on
               {testStatus === "success" ? "Connection successful!" : testStatus.replace("error: ", "")}
             </div>
           )}
+        </>)}
+
+        {/* Local AI Lab (beta) */}
+        {sectionBox(<>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+            <label style={{ ...labelStyle, marginBottom: 0 }}>Local AI Lab</label>
+            <span style={{
+              fontSize: 9, fontWeight: 700, letterSpacing: 0.6, textTransform: "uppercase",
+              padding: "2px 7px", borderRadius: 4,
+              background: T.perfectBg, color: T.perfect,
+              fontFamily: T.fontBody
+            }}>Beta</span>
+          </div>
+          <LocalAILab aiSettings={aiSettings} setAiSettings={setAiSettings} />
         </>)}
 
         {/* Help & Tutorials */}

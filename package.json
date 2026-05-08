@@ -38,8 +38,18 @@
       "category": "public.app-category.education",
       "icon": "build/icon.png",
       "target": [
-        { "target": "zip", "arch": ["arm64"] },
-        { "target": "dir", "arch": ["arm64"] }
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "dir",
+          "arch": [
+            "arm64"
+          ]
+        }
       ],
       "identity": null
     },
@@ -66,6 +76,7 @@
     "@capacitor/keyboard": "^8.0.1",
     "@capacitor/splash-screen": "^8.0.1",
     "@capacitor/status-bar": "^8.0.1",
+    "@mlc-ai/web-llm": "^0.2.83",
     "firebase": "^12.11.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
