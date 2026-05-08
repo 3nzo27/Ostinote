@@ -34,6 +34,11 @@
       "build/icon.*",
       "public/fonts/**/*"
     ],
+    "publish": {
+      "provider": "github",
+      "owner": "3nzo27",
+      "repo": "Ostinote"
+    },
     "mac": {
       "category": "public.app-category.education",
       "icon": "build/icon.png",
@@ -77,6 +82,7 @@
     "@capacitor/splash-screen": "^8.0.1",
     "@capacitor/status-bar": "^8.0.1",
     "@mlc-ai/web-llm": "^0.2.83",
+    "electron-updater": "^6.8.3",
     "firebase": "^12.11.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
