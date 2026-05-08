@@ -44,19 +44,28 @@
       "icon": "build/icon.png",
       "target": [
         {
-          "target": "zip",
+          "target": "dmg",
           "arch": [
             "arm64"
           ]
         },
         {
-          "target": "dir",
+          "target": "zip",
           "arch": [
             "arm64"
           ]
         }
       ],
       "identity": null
+    },
+    "dmg": {
+      "title": "Ostinote ${version}",
+      "icon": "build/icon.png",
+      "contents": [
+        { "x": 130, "y": 220, "type": "file" },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ],
+      "window": { "width": 540, "height": 380 }
     },
     "win": {
       "icon": "build/icon.png",
