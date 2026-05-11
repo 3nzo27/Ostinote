@@ -356,10 +356,13 @@ export default function CardEditor({ initialFront, initialBack, initialTags, onS
             </div>
           )}
           {activeTab === "audio" && (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 200, gap: 16 }}>
-              <div style={{ width: 48, height: 48, borderRadius: "50%", border: `2px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <div style={{ width: 16, height: 16, borderRadius: "50%", background: T.due, opacity: 0.3 }} />
-              </div>
+            <div style={{
+              display: "flex", flexDirection: "column",
+              alignItems: "center", justifyContent: "center",
+              // Match the tab content area's full content-box height (parent minHeight 280 − 36px padding)
+              // so the recorder + drop hint visually center within the whole card panel.
+              minHeight: 244, gap: 14
+            }}>
               <AudioRecorder audioUrl={side.audio} onChange={a => setSide({ ...side, audio: a })} />
               {!side.audio && (
                 <div style={{
