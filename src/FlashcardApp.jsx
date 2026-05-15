@@ -5,6 +5,8 @@ import SM2 from "./utils/sm2.js";
 import defaultDecks from "./data/defaultDecks.js";
 import { saveDecksToFirestore, loadDecksFromFirestore, subscribeToDecks } from "./utils/firestoreSync.js";
 import HomeView from "./views/HomeView/HomeView.jsx";
+import DashboardView from "./views/DashboardView/DashboardView.jsx";
+import WorkspaceView from "./views/WorkspaceView/WorkspaceView.jsx";
 import DecksView from "./views/DecksView/DecksView.jsx";
 import DeckView from "./views/DeckView/DeckView.jsx";
 import AddCardView from "./views/AddCardView/AddCardView.jsx";
@@ -15,6 +17,8 @@ import DirectedStudySessionView from "./views/DirectedStudySessionView/DirectedS
 import DirectedStudyResultsView from "./views/DirectedStudyResultsView/DirectedStudyResultsView.jsx";
 import SettingsView from "./views/SettingsView/SettingsView.jsx";
 import ProfileView from "./views/ProfileView/ProfileView.jsx";
+import DocumentsView from "./views/DocumentsView/DocumentsView.jsx";
+import DocumentReaderView from "./views/DocumentReaderView/DocumentReaderView.jsx";
 import { gradeAnswer } from "./utils/aiGrader.js";
 import { gradeWithLocal } from "./utils/webllm.js";
 import { quickGrade } from "./utils/quickGrade.js";
@@ -128,8 +132,9 @@ export default function FlashcardApp() {
   useEffect(() => { saveToCloud(decks); }, [decks, saveToCloud]);
 
   // --- Core state (ephemeral) ---
-  const [view, setView] = useState("home");
+  const [view, setView] = useState("workspace");
   const [activeDeckId, setActiveDeckId] = useState(null);
+  const [activeDocumentId, setActiveDocumentId] = useState(null);
   const [studyIndex, setStudyIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [showRating, setShowRating] = useState(false);
@@ -177,6 +182,12 @@ export default function FlashcardApp() {
 
   // --- Deck CRUD ---
   const updateDeck = (deckId, updater) => setDecks(prev => prev.map(d => d.id === deckId ? updater(d) : d));
+  // Move a deck into a folder (or to root). Mirrors moveDocument in documentStore.
+  const moveDeckToFolder = (deckId, folderId) => updateDeck(deckId, d => ({ ...d, folderId: folderId || null }));
+  // Library-context deck rename — distinct from `renameDeck` below (which is the
+  // existing DeckView title-edit flow that uses renameValue state).
+  const renameDeckById = (deckId, name) => updateDeck(deckId, d => ({ ...d, name }));
+  const tagDeckById = (deckId, tags) => updateDeck(deckId, d => ({ ...d, tags: tags || [] }));
   const addDeck = () => {
     if (!newDeckName.trim()) return;
     setDecks(prev => [...prev, { id: "d_" + Date.now(), name: newDeckName.trim(), cards: [] }]);
@@ -197,6 +208,29 @@ export default function FlashcardApp() {
     }));
     setView("deck");
   };
+
+  // For the document reader: add a card to an arbitrary deck (existing or new).
+  // deckIdOrSpec is either an existing deck id (e.g. "d_172...") or "new:Deck Name"
+  // to create a new deck. Card can be { front, back, tags? }.
+  const addCardToDeck = (deckIdOrSpec, card) => {
+    const cardToInsert = {
+      id: "c_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
+      front: { text: card.front || "" },
+      back: { text: card.back || "" },
+      tags: card.tags || [],
+      ...SM2.defaultCard(),
+    };
+    if (typeof deckIdOrSpec === "string" && deckIdOrSpec.startsWith("new:")) {
+      const name = deckIdOrSpec.slice(4).trim() || "New Deck";
+      setDecks(prev => [...prev, {
+        id: "d_" + Date.now(),
+        name,
+        cards: [cardToInsert]
+      }]);
+    } else {
+      updateDeck(deckIdOrSpec, d => ({ ...d, cards: [...d.cards, cardToInsert] }));
+    }
+  };
   const updateCard = (front, back, tags) => {
     updateDeck(activeDeckId, d => ({
       ...d, cards: d.cards.map(c => c.id === editCardId ? { ...c, front, back, tags: tags || [] } : c)
@@ -205,6 +239,43 @@ export default function FlashcardApp() {
     setView("deck");
   };
   const deleteCard = (cardId) => updateDeck(activeDeckId, d => ({ ...d, cards: d.cards.filter(c => c.id !== cardId) }));
+  // deckId-aware variants for the workspace deck-tab flow. Browsing
+  // happens inline; Study/Add/Edit hand off to the legacy fullscreen
+  // path by setting activeDeckId (+ editCardId where applicable) and
+  // flipping the view router.
+  const deleteCardInDeck = (deckId, cardId) =>
+    updateDeck(deckId, d => ({ ...d, cards: d.cards.filter(c => c.id !== cardId) }));
+  const startStudyForDeck = (deckId) => {
+    const deck = decks.find(d => d.id === deckId);
+    if (!deck) return;
+    const due = deck.cards.filter(c => c.nextReview <= Date.now());
+    setActiveDeckId(deckId);
+    setStudyCardIds(due.map(c => c.id));
+    setStudyIndex(0);
+    setFlipped(false);
+    setShowRating(false);
+    setGuess("");
+    setAiResult(null);
+    setGuessSubmitted(false);
+    setView("study");
+  };
+  const addCardForDeck = (deckId) => {
+    setActiveDeckId(deckId);
+    setView("addCard");
+  };
+  const editCardForDeck = (deckId, cardId) => {
+    setActiveDeckId(deckId);
+    setEditCardId(cardId);
+    setView("editCard");
+  };
+  // Apply an SM2 rating to a specific card in a specific deck. Used by
+  // the in-Tool-Bar study session so it doesn't have to mess with
+  // activeDeckId (which is for the legacy fullscreen study flow).
+  const applyRatingInDeck = (deckId, cardId, quality) =>
+    updateDeck(deckId, d => ({
+      ...d,
+      cards: d.cards.map(c => c.id === cardId ? SM2.grade(c, quality) : c),
+    }));
 
   // --- Study ---
   const startStudy = () => {
@@ -512,15 +583,41 @@ Respond ONLY with valid JSON, no markdown backticks, in this exact format:
 
   // --- View Router ---
   const renderView = () => {
-  if (view === "home") {
+  // Dashboard tab → the old Home view (deck list + review calendar).
+  // We accept both "dashboard" and the legacy "home" id for backward
+  // compatibility with any persisted view state.
+  if (view === "dashboard" || view === "home") {
     return <HomeView
       decks={decks}
       calOffset={calOffset} setCalOffset={setCalOffset}
       confirmDeleteId={confirmDeleteId} setConfirmDeleteId={setConfirmDeleteId}
       deleteDeck={deleteDeck}
-      exportData={exportData} importData={importData}
       onNavigate={onNavigate} onSelectDeck={onSelectDeck}
+      exportData={exportData} importData={importData}
       onHelpOpen={openHelp}
+    />;
+  }
+  if (view === "workspace") {
+    return <WorkspaceView
+      decks={decks}
+      aiSettings={aiSettings}
+      onAddCardToDeck={addCardToDeck}
+      onMoveDeck={moveDeckToFolder}
+      onRenameDeck={renameDeckById}
+      onTagDeck={tagDeckById}
+      onDeleteDeck={deleteDeck}
+      onSelectDeck={onSelectDeck}
+      // Deck-tab action handlers — let the workspace render a deck tab
+      // with inline rename + delete, plus fullscreen handoff for Study,
+      // Add, and Edit Card.
+      onStartStudyForDeck={startStudyForDeck}
+      onAddCardForDeck={addCardForDeck}
+      onEditCardForDeck={editCardForDeck}
+      onDeleteCardInDeck={deleteCardInDeck}
+      onApplyRatingInDeck={applyRatingInDeck}
+      onNavigate={onNavigate}
+      onHelpOpen={openHelp}
+      user={user}
     />;
   }
 
@@ -608,6 +705,25 @@ Respond ONLY with valid JSON, no markdown backticks, in this exact format:
 
   if (view === "profile") {
     return <ProfileView syncStatus={syncStatus} onNavigate={onNavigate} onHelpOpen={openHelp} />;
+  }
+
+  if (view === "documents") {
+    return <DocumentsView
+      aiSettings={aiSettings}
+      onNavigate={onNavigate}
+      onHelpOpen={openHelp}
+      onOpenDocument={(id) => { setActiveDocumentId(id); setView("document"); }}
+    />;
+  }
+
+  if (view === "document" && activeDocumentId) {
+    return <DocumentReaderView
+      documentId={activeDocumentId}
+      aiSettings={aiSettings}
+      decks={decks}
+      onAddCardToDeck={addCardToDeck}
+      onBack={() => { setActiveDocumentId(null); setView("documents"); }}
+    />;
   }
 
   return null;

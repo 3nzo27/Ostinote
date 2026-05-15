@@ -1,15 +1,19 @@
 import useTheme from "../../theme/useTheme.js";
-import NavBar from "../../components/NavBar/NavBar.jsx";
+import TopBar from "../../components/TopBar/TopBar.jsx";
 import DeckItem from "../../components/DeckItem/DeckItem.jsx";
 import DeleteConfirmModal from "../../components/DeleteConfirmModal/DeleteConfirmModal.jsx";
 
 export default function DecksView({ decks, newDeckName, setNewDeckName, showNewDeck, setShowNewDeck, addDeck, confirmDeleteId, setConfirmDeleteId, deleteDeck, onSelectDeck, onNavigate, onHelpOpen }) {
   const { T } = useTheme();
-  const containerStyle = { maxWidth: 640, margin: "0 auto", padding: "calc(24px + var(--sat)) calc(16px + var(--sar)) calc(24px + var(--sab)) calc(16px + var(--sal))", minHeight: "100vh", fontFamily: T.fontBody, background: T.bg };
+  // Wider page (1080px) so the deck list fills meaningful space rather
+  // than living in a narrow column. Generous side padding so content
+  // doesn't kiss the viewport edges on smaller screens.
+  const containerStyle = { maxWidth: 1080, margin: "0 auto", padding: "calc(28px + var(--sat)) calc(32px + var(--sar)) calc(40px + var(--sab)) calc(32px + var(--sal))", fontFamily: T.fontBody, background: T.bg, width: "100%", boxSizing: "border-box" };
 
   return (
-    <div style={containerStyle}>
-      <NavBar view="decks" onNavigate={onNavigate} onHelpOpen={onHelpOpen} />
+    <div style={{ minHeight: "100vh", background: T.bg, display: "flex", flexDirection: "column" }}>
+      <TopBar view="decks" onNavigate={onNavigate} />
+      <div style={containerStyle}>
       <h2 style={{ fontSize: 22, fontWeight: 700, color: T.text, fontFamily: T.font, marginBottom: 16 }}>All Decks</h2>
       {decks.length === 0 && !showNewDeck ? (
         <div style={{
@@ -38,7 +42,14 @@ export default function DecksView({ decks, newDeckName, setNewDeckName, showNewD
           }}>Create Your First Deck</button>
         </div>
       ) : (<>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10, animation: "fadeIn 0.4s ease" }}>
+      {/* Responsive deck grid — 2–3 columns on wide screens, 1 column
+          below ~620px. min 300px per card keeps deck names readable. */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+        gap: 12,
+        animation: "fadeIn 0.4s ease",
+      }}>
         {[...decks].sort((a, b) => {
           const aDue = a.cards.filter(c => c.nextReview <= Date.now()).length;
           const bDue = b.cards.filter(c => c.nextReview <= Date.now()).length;
@@ -78,6 +89,7 @@ export default function DecksView({ decks, newDeckName, setNewDeckName, showNewD
           onConfirm={() => { deleteDeck(confirmDeleteId); setConfirmDeleteId(null); }}
         />
       )}
+      </div>{/* /containerStyle */}
     </div>
   );
 }

@@ -46,6 +46,23 @@ const PROVIDERS = {
       { id: "gemini-2.0-flash",      name: "Gemini 2.0 Flash",      note: "Legacy balanced" },
     ],
   },
+  // Dev-only: routes prompts through the locally-installed `claude` CLI
+  // (Claude Code). Uses whatever OAuth login is already on this machine —
+  // no API key. Only works in the Electron desktop build, since the bridge
+  // lives in the main process. The Settings UI should only surface this
+  // provider when `window.ostinoteAI` is present.
+  "claude-local": {
+    name: "Claude (this device)",
+    placeholder: "", // no key needed
+    noKey: true,
+    devOnly: true,
+    defaultModel: "sonnet",
+    models: [
+      { id: "haiku",  name: "Claude Haiku",  note: "Fast",                 recommended: true },
+      { id: "sonnet", name: "Claude Sonnet", note: "Balanced (default)" },
+      { id: "opus",   name: "Claude Opus",   note: "Best, slowest" },
+    ],
+  },
 };
 
 async function callAnthropic(apiKey, model, prompt) {
@@ -108,15 +125,78 @@ async function callGoogle(apiKey, model, prompt) {
   return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
 }
 
-export async function gradeAnswer(settings, prompt) {
-  const { provider, apiKey, model } = settings;
-  if (!apiKey) throw new Error("No API key configured");
+// Bridge into the locally-installed `claude` CLI. Two transports, picked
+// at call time:
+//   1. Electron: `window.ostinoteAI.complete` exposed by preload.cjs
+//   2. Vite dev: `POST /_ai/complete` served by vite-plugin-claude-bridge
+// Both wrap the same underlying `claude --print` invocation in the Node
+// side of the build, so behavior is identical.
+async function callClaudeLocal(model, prompt) {
+  // Prefer Electron's IPC when it's available — it's slightly cheaper than
+  // a fetch round-trip and works in the packaged build too.
+  const electronBridge = typeof window !== "undefined" ? window.ostinoteAI : null;
+  if (electronBridge?.complete) {
+    return electronBridge.complete({ prompt, model });
+  }
+  // Fallback: the Vite dev server's /_ai/complete endpoint. Only present
+  // when running `npm run dev` (or `electron:dev` which builds, not dev).
+  const res = await fetch("/_ai/complete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt, model }),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`Claude (local) failed: ${msg || res.status}`);
+  }
+  return res.text();
+}
 
-  let text;
-  if (provider === "anthropic") text = await callAnthropic(apiKey, model, prompt);
-  else if (provider === "openai") text = await callOpenAI(apiKey, model, prompt);
-  else if (provider === "google") text = await callGoogle(apiKey, model, prompt);
-  else throw new Error("Unknown provider");
+// True if the user has the credentials needed for cloud-AI features
+// (chat, PDF conversion, flashcard generation). Covers both the keyed
+// providers and the keyless claude-local — anywhere in the renderer
+// that gates a feature on "do we have AI?" should call this rather than
+// inspecting aiSettings.apiKey directly.
+export function hasAiCredentials(settings) {
+  if (!settings) return false;
+  if (settings.provider === "claude-local") return true;
+  return !!settings.apiKey;
+}
+
+// True if the dev-only Claude (local) provider can be used here. Probes
+// both transports; the renderer awaits this once at mount.
+//
+// In Electron, the preload bridge is detectable synchronously, but we
+// keep the API async so the Vite-dev branch can fetch /_ai/available.
+export async function isClaudeLocalAvailable() {
+  if (typeof window === "undefined") return false;
+  if (window.ostinoteAI?.complete) {
+    try { return await window.ostinoteAI.isAvailable(); } catch { return false; }
+  }
+  // Probe the Vite middleware. Times out fast on production builds where
+  // /_ai/* doesn't exist (the response will 404 or similar).
+  try {
+    const res = await fetch("/_ai/available", { method: "GET" });
+    if (!res.ok) return false;
+    const data = await res.json();
+    return !!data?.ok;
+  } catch { return false; }
+}
+
+// Generic text-completion across providers — used by features beyond grading
+// (PDF→Markdown conversion, summarization, etc).
+export async function callAi(settings, prompt) {
+  const { provider, apiKey, model } = settings;
+  if (provider === "claude-local") return callClaudeLocal(model, prompt);
+  if (!apiKey) throw new Error("No API key configured");
+  if (provider === "anthropic") return callAnthropic(apiKey, model, prompt);
+  if (provider === "openai") return callOpenAI(apiKey, model, prompt);
+  if (provider === "google") return callGoogle(apiKey, model, prompt);
+  throw new Error("Unknown provider");
+}
+
+export async function gradeAnswer(settings, prompt) {
+  const text = await callAi(settings, prompt);
 
   const clean = text.replace(/```json|```/g, "").trim();
   // Forgiving JSON extraction: pull the first {...} object even if the model

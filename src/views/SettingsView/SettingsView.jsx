@@ -1,15 +1,26 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import useTheme from "../../theme/useTheme.js";
-import NavBar from "../../components/NavBar/NavBar.jsx";
-import { PROVIDERS } from "../../utils/aiGrader.js";
+import TopBar from "../../components/TopBar/TopBar.jsx";
+import { PROVIDERS, isClaudeLocalAvailable } from "../../utils/aiGrader.js";
 import LocalAILab from "../../components/LocalAILab/LocalAILab.jsx";
 
 export default function SettingsView({ aiSettings, setAiSettings, syncStatus, onNavigate, onHelpOpen, onReplayOnboarding }) {
   const { T, darkMode, setDarkMode } = useTheme();
   const [showKey, setShowKey] = useState(false);
   const [testStatus, setTestStatus] = useState(null);
+  // Hide the dev-only Claude (local) provider unless either the Electron
+  // preload bridge OR the Vite dev /_ai endpoints are reachable. Probes
+  // once at mount; async because the Vite branch makes a fetch call.
+  const [claudeLocalReady, setClaudeLocalReady] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    isClaudeLocalAvailable()
+      .then((ok) => { if (!cancelled) setClaudeLocalReady(!!ok); })
+      .catch(() => { if (!cancelled) setClaudeLocalReady(false); });
+    return () => { cancelled = true; };
+  }, []);
 
-  const containerStyle = { maxWidth: 640, margin: "0 auto", padding: "calc(24px + var(--sat)) calc(16px + var(--sar)) calc(24px + var(--sab)) calc(16px + var(--sal))", minHeight: "100vh", fontFamily: T.fontBody, background: T.bg };
+  const containerStyle = { maxWidth: 640, margin: "0 auto", padding: "calc(24px + var(--sat)) calc(16px + var(--sar)) calc(24px + var(--sab)) calc(16px + var(--sal))", fontFamily: T.fontBody, background: T.bg };
 
   const provider = PROVIDERS[aiSettings.provider] || PROVIDERS.anthropic;
 
@@ -48,8 +59,9 @@ export default function SettingsView({ aiSettings, setAiSettings, syncStatus, on
   const labelStyle = { fontSize: 13, fontWeight: 600, color: T.text, fontFamily: T.fontBody, marginBottom: 8, display: "block" };
 
   return (
-    <div style={containerStyle}>
-      <NavBar view="settings" onNavigate={onNavigate} onHelpOpen={onHelpOpen} />
+    <div style={{ minHeight: "100vh", background: T.bg, display: "flex", flexDirection: "column" }}>
+      <TopBar view="settings" onNavigate={onNavigate} />
+      <div style={containerStyle}>
 
       <h1 style={{ fontSize: 26, fontWeight: 700, color: T.text, fontFamily: T.font, marginBottom: 4 }}>Settings</h1>
       <p style={{ fontSize: 14, color: T.textMid, fontFamily: T.fontBody, marginBottom: 24 }}>
@@ -109,17 +121,27 @@ export default function SettingsView({ aiSettings, setAiSettings, syncStatus, on
         {sectionBox(<>
           <label style={labelStyle}>AI Provider</label>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {Object.entries(PROVIDERS).map(([key, p]) => (
-              <button key={key} onClick={() => updateSetting("provider", key)} style={{
-                padding: "10px 16px", borderRadius: T.radius, cursor: "pointer",
-                border: aiSettings.provider === key ? `2px solid ${T.good}` : `1.5px solid ${T.border}`,
-                background: aiSettings.provider === key ? T.goodBg : T.card,
-                color: aiSettings.provider === key ? T.good : T.textMid,
-                fontWeight: 600, fontSize: 13, fontFamily: T.fontBody,
-                transition: "all 0.15s", flex: "1 1 0", minWidth: 140, textAlign: "center"
-              }}>{p.name}</button>
-            ))}
+            {Object.entries(PROVIDERS)
+              // Hide dev-only providers (claude-local) on builds where the
+              // bridge isn't available — keeps the web build clean.
+              .filter(([, p]) => !p.devOnly || claudeLocalReady)
+              .map(([key, p]) => (
+                <button key={key} onClick={() => updateSetting("provider", key)} style={{
+                  padding: "10px 16px", borderRadius: T.radius, cursor: "pointer",
+                  border: aiSettings.provider === key ? `2px solid ${T.good}` : `1.5px solid ${T.border}`,
+                  background: aiSettings.provider === key ? T.goodBg : T.card,
+                  color: aiSettings.provider === key ? T.good : T.textMid,
+                  fontWeight: 600, fontSize: 13, fontFamily: T.fontBody,
+                  transition: "all 0.15s", flex: "1 1 0", minWidth: 140, textAlign: "center"
+                }}>{p.name}</button>
+              ))}
           </div>
+          {provider.devOnly && (
+            <p style={{ fontSize: 11, color: T.textLight, fontFamily: T.fontBody, marginTop: 10, lineHeight: 1.5 }}>
+              Uses your local Claude Code login on this machine — no API key required.
+              Only works in the desktop app. Run <code>claude</code> once in a terminal to log in if you haven't.
+            </p>
+          )}
         </>)}
 
         {/* Model Selection */}
@@ -168,8 +190,8 @@ export default function SettingsView({ aiSettings, setAiSettings, syncStatus, on
           </div>
         </>)}
 
-        {/* API Key */}
-        {sectionBox(<>
+        {/* API Key — hidden for keyless providers (e.g. claude-local) */}
+        {!provider.noKey && sectionBox(<>
           <label style={labelStyle}>API Key</label>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <input
@@ -199,22 +221,28 @@ export default function SettingsView({ aiSettings, setAiSettings, syncStatus, on
 
         {/* Test Connection */}
         {sectionBox(<>
+          {(() => {
+            // Keyless providers can always be tested; cloud ones need a key.
+            const canTest = provider.noKey || !!aiSettings.apiKey;
+            return (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div>
               <div style={{ fontSize: 13, fontWeight: 600, color: T.text, fontFamily: T.fontBody }}>Test Connection</div>
               <p style={{ fontSize: 11, color: T.textLight, fontFamily: T.fontBody, marginTop: 2 }}>
-                Verify your API key works
+                {provider.noKey ? "Verify the local Claude CLI is reachable" : "Verify your API key works"}
               </p>
             </div>
-            <button onClick={testConnection} disabled={!aiSettings.apiKey || testStatus === "testing"} style={{
+            <button onClick={testConnection} disabled={!canTest || testStatus === "testing"} style={{
               padding: "10px 20px", borderRadius: T.radius, border: "none",
-              background: aiSettings.apiKey ? T.good : T.bgSub,
-              color: aiSettings.apiKey ? "#fff" : T.textLight,
-              fontWeight: 600, fontSize: 13, cursor: aiSettings.apiKey ? "pointer" : "default",
+              background: canTest ? T.good : T.bgSub,
+              color: canTest ? "#fff" : T.textLight,
+              fontWeight: 600, fontSize: 13, cursor: canTest ? "pointer" : "default",
               fontFamily: T.fontBody, transition: "all 0.15s",
               opacity: testStatus === "testing" ? 0.6 : 1
             }}>{testStatus === "testing" ? "Testing..." : "Test"}</button>
           </div>
+            );
+          })()}
           {testStatus && testStatus !== "testing" && (
             <div style={{
               marginTop: 12, padding: "10px 14px", borderRadius: T.radius,
@@ -282,6 +310,7 @@ export default function SettingsView({ aiSettings, setAiSettings, syncStatus, on
         </>)}
 
       </div>
+      </div>{/* /containerStyle */}
     </div>
   );
 }

@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stack!</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #1a1a2e;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      font-family: 'Segoe UI', sans-serif;
+      overflow: hidden;
+      user-select: none;
+    }
+    canvas {
+      display: block;
+      border-radius: 8px;
+      box-shadow: 0 0 40px rgba(0,0,0,0.5);
+    }
+    #ui {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+    #score-display {
+      position: absolute;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: white;
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.5);
+      z-index: 10;
+    }
+    #overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(10, 10, 30, 0.85);
+      border-radius: 8px;
+      color: white;
+      text-align: center;
+      padding: 40px;
+      pointer-events: all;
+      cursor: pointer;
+    }
+    #overlay h1 {
+      font-size: 52px;
+      font-weight: 900;
+      letter-spacing: 4px;
+      margin-bottom: 8px;
+      background: linear-gradient(135deg, #a78bfa, #60a5fa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    #overlay .subtitle {
+      font-size: 16px;
+      color: #94a3b8;
+      margin-bottom: 32px;
+    }
+    #overlay .final-score {
+      font-size: 64px;
+      font-weight: 900;
+      margin-bottom: 8px;
+      color: #f8fafc;
+    }
+    #overlay .score-label {
+      font-size: 14px;
+      color: #94a3b8;
+      letter-spacing: 3px;
+      margin-bottom: 40px;
+    }
+    #overlay .cta {
+      font-size: 18px;
+      color: #e2e8f0;
+      background: rgba(167, 139, 250, 0.2);
+      border: 1px solid rgba(167, 139, 250, 0.4);
+      padding: 14px 40px;
+      border-radius: 50px;
+      letter-spacing: 2px;
+    }
+    #overlay .hint {
+      margin-top: 16px;
+      font-size: 13px;
+      color: #475569;
+      letter-spacing: 1px;
+    }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div style="position:relative;">
+    <canvas id="canvas"></canvas>
+    <div id="score-display">0</div>
+    <div id="overlay">
+      <h1>STACK</h1>
+      <div class="subtitle">How high can you go?</div>
+      <div class="cta">PRESS SPACE TO PLAY</div>
+      <div class="hint">or tap anywhere</div>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const overlay = document.getElementById('overlay');
+    const scoreDisplay = document.getElementById('score-display');
+
+    // Dimensions
+    const W = 320;
+    const H = 500;
+    const BLOCK_HEIGHT = 24;
+    const VISIBLE_ROWS = Math.floor(H / BLOCK_HEIGHT);
+    const BASE_WIDTH = 240;
+    const BASE_SPEED = 1.8;
+
+    canvas.width = W;
+    canvas.height = H;
+
+    // Color palettes per level zone
+    const PALETTES = [
+      ['#818cf8','#6366f1','#4f46e5'],
+      ['#34d399','#10b981','#059669'],
+      ['#f472b6','#ec4899','#db2777'],
+      ['#fb923c','#f97316','#ea580c'],
+      ['#38bdf8','#0ea5e9','#0284c7'],
+      ['#a78bfa','#8b5cf6','#7c3aed'],
+    ];
+
+    let state = 'idle'; // idle | playing | dead
+    let score = 0;
+    let blocks = [];
+    let movingBlock = null;
+    let cameraY = 0;
+    let targetCameraY = 0;
+    let particles = [];
+    let shakeAmount = 0;
+    let bonusQueue = 0;
+    let bonusTimer = 0;
+    let perfectStreak = 0;
+
+    function getPalette(index) {
+      return PALETTES[Math.floor(index / 5) % PALETTES.length];
+    }
+
+    function getSpeed(score) {
+      return BASE_SPEED + score * 0.08;
+    }
+
+    function initGame() {
+      score = 0;
+      particles = [];
+      shakeAmount = 0;
+      cameraY = 0;
+      targetCameraY = 0;
+      bonusQueue = 0;
+      bonusTimer = 0;
+      perfectStreak = 0;
+
+      // Base block
+      blocks = [{
+        x: (W - BASE_WIDTH) / 2,
+        y: H - BLOCK_HEIGHT,
+        width: BASE_WIDTH,
+        height: BLOCK_HEIGHT,
+        color: getPalette(0)[0],
+      }];
+
+      spawnMovingBlock();
+      state = 'playing';
+      overlay.classList.add('hidden');
+      scoreDisplay.textContent = '0';
+    }
+
+    function spawnMovingBlock() {
+      const lastBlock = blocks[blocks.length - 1];
+      const pal = getPalette(score);
+      movingBlock = {
+        x: score % 2 === 0 ? -lastBlock.width : W,
+        y: lastBlock.y - BLOCK_HEIGHT,
+        width: lastBlock.width,
+        height: BLOCK_HEIGHT,
+        direction: score % 2 === 0 ? 1 : -1,
+        color: pal[score % pal.length],
+      };
+    }
+
+    function placeBlock() {
+      if (state !== 'playing' || !movingBlock) return;
+
+      const last = blocks[blocks.length - 1];
+      const overlapLeft = Math.max(movingBlock.x, last.x);
+      const overlapRight = Math.min(movingBlock.x + movingBlock.width, last.x + last.width);
+      const overlapWidth = overlapRight - overlapLeft;
+
+      if (overlapWidth <= 0) {
+        // Missed completely
+        gameOver();
+        return;
+      }
+
+      // Perfect bonus
+      const isPerfect = Math.abs(overlapWidth - last.width) < 3;
+      const finalWidth = isPerfect ? last.width : overlapWidth;
+      const finalX = isPerfect ? last.x : overlapLeft;
+
+      // Spawn fall-off debris particle
+      if (!isPerfect) {
+        perfectStreak = 0;
+        const leftChunk = overlapLeft - movingBlock.x;
+        const rightChunk = (movingBlock.x + movingBlock.width) - overlapRight;
+
+        if (leftChunk > 0) {
+          spawnDebris(movingBlock.x, movingBlock.y, leftChunk, movingBlock.color);
+        }
+        if (rightChunk > 0) {
+          spawnDebris(overlapRight, movingBlock.y, rightChunk, movingBlock.color);
+        }
+      } else {
+        // Perfect: flash + grow effect + bonus block
+        perfectStreak++;
+        // Exponential payout once streak reaches 3
+        // streak 1 -> 1, 2 -> 1, 3 -> 2, 4 -> 4, 5 -> 8, capped at 32
+        const payout = perfectStreak < 3 ? 1 : Math.min(Math.pow(2, perfectStreak - 2), 32);
+        shakeAmount = 3 + Math.min(perfectStreak, 8);
+        spawnPerfectParticles(finalX + finalWidth / 2, movingBlock.y, movingBlock.color);
+        bonusQueue += payout;
+        bonusTimer = 18;
+
+        if (perfectStreak >= 3) {
+          spawnStreakBanner(perfectStreak, payout);
+        }
+      }
+
+      blocks.push({
+        x: finalX,
+        y: movingBlock.y,
+        width: finalWidth,
+        height: BLOCK_HEIGHT,
+        color: movingBlock.color,
+        flash: isPerfect ? 1.0 : 0,
+      });
+
+      score++;
+      scoreDisplay.textContent = score;
+
+      // Camera: scroll up when top quarter is reached
+      const topBlockScreenY = blocks[blocks.length - 1].y - cameraY;
+      if (topBlockScreenY < H * 0.4) {
+        targetCameraY = blocks[blocks.length - 1].y - H * 0.6;
+      }
+
+      movingBlock = null;
+      if (bonusQueue === 0) spawnMovingBlock();
+    }
+
+    function dropBonusBlock() {
+      const last = blocks[blocks.length - 1];
+      const pal = getPalette(score);
+      const color = pal[score % pal.length];
+
+      blocks.push({
+        x: last.x,
+        y: last.y - BLOCK_HEIGHT,
+        width: last.width,
+        height: BLOCK_HEIGHT,
+        color,
+        flash: 1.0,
+        bonus: true,
+      });
+
+      shakeAmount = 4;
+      spawnPerfectParticles(last.x + last.width / 2, last.y - BLOCK_HEIGHT, color);
+      spawnBonusText(last.x + last.width / 2, last.y - BLOCK_HEIGHT);
+
+      score++;
+      scoreDisplay.textContent = score;
+
+      const topBlockScreenY = blocks[blocks.length - 1].y - cameraY;
+      if (topBlockScreenY < H * 0.4) {
+        targetCameraY = blocks[blocks.length - 1].y - H * 0.6;
+      }
+
+      bonusQueue--;
+      if (bonusQueue === 0) spawnMovingBlock();
+      else bonusTimer = 14;
+    }
+
+    function spawnBonusText(cx, cy) {
+      particles.push({
+        type: 'text',
+        text: '+1 BONUS',
+        x: cx,
+        y: cy,
+        vx: 0,
+        vy: -1.2,
+        gravity: 0,
+        alpha: 1,
+        color: '#fde047',
+      });
+    }
+
+    function spawnStreakBanner(streak, payout) {
+      // Big banner near the top of the play area showing combo
+      const tiers = ['#fde047', '#fb923c', '#f472b6', '#a78bfa', '#34d399'];
+      const color = tiers[Math.min(streak - 3, tiers.length - 1)];
+      particles.push({
+        type: 'banner',
+        text: `x${streak} COMBO!`,
+        sub: `+${payout} BLOCKS`,
+        x: W / 2,
+        y: cameraY + H * 0.25,
+        vx: 0,
+        vy: -0.4,
+        gravity: 0,
+        alpha: 1.4,
+        color,
+        scale: 1.4,
+      });
+      // Burst sparks for visual punch
+      for (let i = 0; i < 24; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = Math.random() * 5 + 2;
+        particles.push({
+          type: 'spark',
+          x: W / 2,
+          y: cameraY + H * 0.3,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          gravity: 0.05,
+          color,
+          alpha: 1,
+          size: Math.random() * 5 + 2,
+        });
+      }
+    }
+
+    function spawnDebris(x, y, width, color) {
+      for (let i = 0; i < 6; i++) {
+        particles.push({
+          type: 'debris',
+          x: x + Math.random() * width,
+          y: y + BLOCK_HEIGHT / 2,
+          vx: (Math.random() - 0.5) * 3,
+          vy: -Math.random() * 2 - 1,
+          gravity: 0.15,
+          color,
+          alpha: 1,
+          w: Math.random() * 8 + 4,
+          h: Math.random() * 6 + 3,
+          rot: Math.random() * Math.PI * 2,
+          rotV: (Math.random() - 0.5) * 0.2,
+        });
+      }
+    }
+
+    function spawnPerfectParticles(cx, cy, color) {
+      for (let i = 0; i < 16; i++) {
+        const angle = (i / 16) * Math.PI * 2;
+        const speed = Math.random() * 3 + 1;
+        particles.push({
+          type: 'spark',
+          x: cx,
+          y: cy + BLOCK_HEIGHT / 2,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed - 1,
+          gravity: 0.08,
+          color,
+          alpha: 1,
+          size: Math.random() * 4 + 2,
+        });
+      }
+    }
+
+    function gameOver() {
+      state = 'dead';
+      shakeAmount = 8;
+
+      // Drop the moving block
+      if (movingBlock) {
+        spawnDebris(movingBlock.x, movingBlock.y, movingBlock.width, movingBlock.color);
+        movingBlock = null;
+      }
+
+      setTimeout(() => {
+        overlay.classList.remove('hidden');
+        overlay.innerHTML = `
+          <div class="final-score">${score}</div>
+          <div class="score-label">BLOCKS STACKED</div>
+          <div class="cta">PLAY AGAIN</div>
+          <div class="hint">SPACE or tap</div>
+        `;
+      }, 600);
+    }
+
+    function updateParticles() {
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += p.gravity;
+        const decay = p.type === 'banner' ? 0.012 : 0.025;
+        p.alpha -= decay;
+        if (p.rot !== undefined) p.rot += p.rotV;
+        if (p.alpha <= 0) particles.splice(i, 1);
+      }
+    }
+
+    function draw(timestamp) {
+      // Smooth camera
+      cameraY += (targetCameraY - cameraY) * 0.1;
+
+      // Shake
+      let shakeX = 0, shakeY = 0;
+      if (shakeAmount > 0) {
+        shakeX = (Math.random() - 0.5) * shakeAmount;
+        shakeY = (Math.random() - 0.5) * shakeAmount;
+        shakeAmount *= 0.8;
+        if (shakeAmount < 0.1) shakeAmount = 0;
+      }
+
+      ctx.save();
+      ctx.translate(shakeX, shakeY);
+
+      // Background gradient
+      const grad = ctx.createLinearGradient(0, 0, 0, H);
+      grad.addColorStop(0, '#0f172a');
+      grad.addColorStop(1, '#1e1b4b');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+
+      // Grid lines (subtle)
+      ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+      ctx.lineWidth = 1;
+      for (let y = 0; y < H; y += BLOCK_HEIGHT) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(W, y);
+        ctx.stroke();
+      }
+
+      // Draw placed blocks
+      for (const block of blocks) {
+        const screenY = block.y - cameraY;
+        if (screenY > H + BLOCK_HEIGHT || screenY < -BLOCK_HEIGHT * 2) continue;
+
+        ctx.save();
+
+        // Flash effect for perfect
+        if (block.flash > 0) {
+          block.flash -= 0.05;
+          ctx.shadowBlur = 20 * block.flash;
+          ctx.shadowColor = block.color;
+        }
+
+        // Main block
+        const bx = block.x + 2;
+        const by = screenY + 2;
+        const bw = block.width - 4;
+        const bh = BLOCK_HEIGHT - 3;
+
+        // Shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.fillRect(bx + 2, by + 2, bw, bh);
+
+        // Block body
+        ctx.fillStyle = block.color;
+        roundRect(ctx, bx, by, bw, bh, 4);
+        ctx.fill();
+
+        // Highlight
+        const hiGrad = ctx.createLinearGradient(bx, by, bx, by + bh * 0.5);
+        hiGrad.addColorStop(0, 'rgba(255,255,255,0.25)');
+        hiGrad.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = hiGrad;
+        roundRect(ctx, bx, by, bw, bh * 0.5, 4);
+        ctx.fill();
+
+        ctx.restore();
+      }
+
+      // Draw moving block
+      if (movingBlock && state === 'playing') {
+        const screenY = movingBlock.y - cameraY;
+
+        // Speed indicator glow
+        const speed = getSpeed(score);
+        const glowIntensity = Math.min((speed - BASE_SPEED) / 3, 1);
+        ctx.shadowBlur = 8 + glowIntensity * 12;
+        ctx.shadowColor = movingBlock.color;
+
+        const bx = movingBlock.x + 2;
+        const by = screenY + 2;
+        const bw = movingBlock.width - 4;
+        const bh = BLOCK_HEIGHT - 3;
+
+        ctx.fillStyle = movingBlock.color;
+        roundRect(ctx, bx, by, bw, bh, 4);
+        ctx.fill();
+
+        const hiGrad = ctx.createLinearGradient(bx, by, bx, by + bh * 0.5);
+        hiGrad.addColorStop(0, 'rgba(255,255,255,0.3)');
+        hiGrad.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = hiGrad;
+        roundRect(ctx, bx, by, bw, bh * 0.5, 4);
+        ctx.fill();
+
+        ctx.shadowBlur = 0;
+      }
+
+      // Draw particles
+      for (const p of particles) {
+        const screenY = p.y - cameraY;
+        ctx.save();
+        ctx.globalAlpha = p.alpha;
+        if (p.type === 'debris') {
+          ctx.translate(p.x, screenY);
+          ctx.rotate(p.rot);
+          ctx.fillStyle = p.color;
+          ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+        } else if (p.type === 'text') {
+          ctx.fillStyle = p.color;
+          ctx.font = 'bold 16px Segoe UI, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.shadowBlur = 8;
+          ctx.shadowColor = p.color;
+          ctx.fillText(p.text, p.x, screenY);
+        } else if (p.type === 'banner') {
+          ctx.textAlign = 'center';
+          ctx.shadowBlur = 16;
+          ctx.shadowColor = p.color;
+          ctx.fillStyle = p.color;
+          ctx.font = `900 ${Math.round(36 * p.scale)}px Segoe UI, sans-serif`;
+          ctx.fillText(p.text, p.x, screenY);
+          ctx.font = `bold 14px Segoe UI, sans-serif`;
+          ctx.shadowBlur = 8;
+          ctx.fillStyle = '#fff';
+          ctx.fillText(p.sub, p.x, screenY + 22);
+        } else {
+          ctx.fillStyle = p.color;
+          ctx.beginPath();
+          ctx.arc(p.x, screenY, p.size, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      ctx.restore();
+    }
+
+    function roundRect(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      ctx.lineTo(x + r, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.closePath();
+    }
+
+    let lastTime = 0;
+    function gameLoop(timestamp) {
+      const dt = Math.min(timestamp - lastTime, 50);
+      lastTime = timestamp;
+
+      if (state === 'playing' && bonusQueue > 0 && !movingBlock) {
+        bonusTimer--;
+        if (bonusTimer <= 0) dropBonusBlock();
+      }
+
+      if (state === 'playing' && movingBlock) {
+        const speed = getSpeed(score);
+        movingBlock.x += movingBlock.direction * speed;
+
+        // Bounce off walls
+        if (movingBlock.x < -movingBlock.width * 0.5) {
+          movingBlock.x = -movingBlock.width * 0.5;
+          movingBlock.direction = 1;
+        } else if (movingBlock.x + movingBlock.width > W + movingBlock.width * 0.5) {
+          movingBlock.x = W - movingBlock.width * 0.5;
+          movingBlock.direction = -1;
+        }
+      }
+
+      updateParticles();
+      draw(timestamp);
+      requestAnimationFrame(gameLoop);
+    }
+
+    // Input
+    function handleAction() {
+      if (state === 'idle' || state === 'dead') {
+        initGame();
+      } else if (state === 'playing') {
+        placeBlock();
+      }
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        handleAction();
+      }
+    });
+
+    canvas.addEventListener('click', handleAction);
+    overlay.addEventListener('click', handleAction);
+
+    // Start loop
+    requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

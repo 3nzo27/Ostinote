@@ -1,5 +1,6 @@
-const { app, BrowserWindow, shell, dialog, Notification } = require("electron");
+const { app, BrowserWindow, shell, dialog, Notification, ipcMain } = require("electron");
 const path = require("path");
+const { spawn } = require("node:child_process");
 const { autoUpdater } = require("electron-updater");
 
 // Window size tuned for the 640px max-width UI + padding + frame
@@ -35,6 +36,8 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       backgroundThrottling: false, // Keep app responsive when not focused
+      // Exposes `window.ostinoteAI` for the dev-only Claude (local) provider.
+      preload: path.join(__dirname, "preload.cjs"),
     },
     icon: path.join(__dirname, "../build/icon.png"),
     show: false,
@@ -139,6 +142,95 @@ function promptInstall(info) {
     autoUpdater.quitAndInstall();
   }
 }
+
+// ---------------------------------------------------------------------------
+// AI bridge: run prompts through the locally-installed `claude` CLI.
+//
+// Why: lets us drive every AI feature in the app using your own Claude Code
+// OAuth login — no API key, no per-token cost. Strictly a dev-machine
+// convenience; the renderer detects `window.ostinoteAI` before allowing the
+// "Claude (local)" provider to be picked.
+//
+// Implementation: spawn `claude --print` and pipe the prompt over stdin so
+// we don't trip ARG_MAX on long flashcard-generation prompts that embed
+// whole documents.
+// ---------------------------------------------------------------------------
+function findClaudeBinary() {
+  // The CLI is usually on PATH after `npm install -g @anthropic-ai/claude-code`,
+  // but Electron apps don't always inherit a login shell's PATH on macOS, so
+  // we also try the common install locations explicitly.
+  const candidates = [
+    "claude", // PATH
+    path.join(process.env.HOME || "", ".claude", "local", "claude"),
+    path.join(process.env.HOME || "", ".local", "bin", "claude"),
+    "/usr/local/bin/claude",
+    "/opt/homebrew/bin/claude",
+  ];
+  return candidates;
+}
+
+function runClaude(args, { stdinText } = {}) {
+  return new Promise((resolve, reject) => {
+    const candidates = findClaudeBinary();
+    let attempt = 0;
+
+    const tryNext = () => {
+      if (attempt >= candidates.length) {
+        reject(new Error(
+          "Could not find the `claude` CLI. Install it with " +
+          "`npm install -g @anthropic-ai/claude-code` and run `claude` once to log in."
+        ));
+        return;
+      }
+      const bin = candidates[attempt++];
+      const child = spawn(bin, args, { stdio: ["pipe", "pipe", "pipe"] });
+      let out = "";
+      let err = "";
+
+      child.on("error", (e) => {
+        // ENOENT → try the next candidate; anything else → fail.
+        if (e.code === "ENOENT") tryNext();
+        else reject(e);
+      });
+      child.stdout.on("data", (d) => { out += d.toString(); });
+      child.stderr.on("data", (d) => { err += d.toString(); });
+      child.on("exit", (code) => {
+        if (code === 0) resolve(out);
+        // CLI writes failure messages like "Not logged in" to stdout
+        // (not stderr) before exiting non-zero. Surface whichever stream
+        // has content so the renderer's error toast is useful.
+        else reject(new Error(`claude exited with code ${code}: ${err.trim() || out.trim() || "(no output)"}`));
+      });
+
+      if (stdinText != null) {
+        child.stdin.write(stdinText);
+        child.stdin.end();
+      } else {
+        child.stdin.end();
+      }
+    };
+    tryNext();
+  });
+}
+
+ipcMain.handle("ai:available", async () => {
+  try {
+    await runClaude(["--version"]);
+    return true;
+  } catch {
+    return false;
+  }
+});
+
+ipcMain.handle("ai:complete", async (_evt, { prompt, model }) => {
+  if (!prompt || typeof prompt !== "string") {
+    throw new Error("Prompt must be a non-empty string");
+  }
+  const args = ["--print", "--output-format", "text"];
+  if (model) args.push("--model", model);
+  const text = await runClaude(args, { stdinText: prompt });
+  return text.trimEnd();
+});
 
 // ---------------------------------------------------------------------------
 

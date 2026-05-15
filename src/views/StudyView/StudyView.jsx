@@ -7,10 +7,18 @@ export default function StudyView({
   studyCards, studyIndex, flipped, guess, guessSubmitted, aiResult, aiLoading,
   showFlipHint, hideFlipHintForever,
   setGuess, submitGuess, skipGuess, handleFlip, handleRate,
-  setShowFlipHint, setHideFlipHintForever, onNavigate
+  setShowFlipHint, setHideFlipHintForever, onNavigate,
+  // inWindow=true → render compactly inside a DeckWindow (no page chrome,
+  // smaller spacing, "Exit" routes via onNavigate() with no arg).
+  inWindow = false,
 }) {
   const { T } = useTheme();
-  const containerStyle = { maxWidth: 640, margin: "0 auto", padding: "calc(24px + var(--sat)) calc(16px + var(--sar)) calc(24px + var(--sab)) calc(16px + var(--sal))", minHeight: "100vh", fontFamily: T.fontBody, background: T.bg };
+  const containerStyle = inWindow
+    ? { padding: "12px 14px", minHeight: 0, fontFamily: T.fontBody, background: T.bg }
+    : { maxWidth: 640, margin: "0 auto", padding: "calc(24px + var(--sat)) calc(16px + var(--sar)) calc(24px + var(--sab)) calc(16px + var(--sal))", minHeight: "100vh", fontFamily: T.fontBody, background: T.bg };
+  // Exit handler — fullscreen study calls exitStudy(); in-window
+  // study calls a no-arg goBackToList passed via onNavigate.
+  const exitStudy = () => inWindow ? onNavigate() : exitStudy();
 
   const guessInputRef = useRef(null);
   useEffect(() => {
@@ -69,13 +77,13 @@ export default function StudyView({
         <p style={{ color: T.textMid, marginTop: 4, marginBottom: 28, fontFamily: T.fontBody, fontSize: 14, textAlign: "center", lineHeight: 1.5, maxWidth: 260 }}>
           No cards due right now. Come back later for your next review.
         </p>
-        <button onClick={() => onNavigate("deck")} style={{ padding: "12px 28px", borderRadius: T.radius, border: "none", background: T.accent, color: T.white, fontWeight: 600, fontSize: 14, cursor: "pointer", fontFamily: T.fontBody, boxShadow: "0 2px 8px rgba(44,42,37,0.2)", transition: "all 0.15s" }}>Back to Deck</button>
+        <button onClick={() => exitStudy()} style={{ padding: "12px 28px", borderRadius: T.radius, border: "none", background: T.accent, color: T.white, fontWeight: 600, fontSize: 14, cursor: "pointer", fontFamily: T.fontBody, boxShadow: "0 2px 8px rgba(44,42,37,0.2)", transition: "all 0.15s" }}>Back to Deck</button>
       </div>
     );
   }
 
   const currentCard = studyCards[studyIndex];
-  if (!currentCard) { onNavigate("deck"); return null; }
+  if (!currentCard) { exitStudy(); return null; }
 
   const onFlip = () => {
     if (guessSubmitted) {
@@ -92,7 +100,7 @@ export default function StudyView({
   return (
     <div style={{ ...containerStyle, overflow: "hidden" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-        <button onClick={() => onNavigate("deck")} style={{ background: "none", border: "none", color: T.textMid, fontSize: 13, fontWeight: 500, cursor: "pointer", padding: 0, fontFamily: T.fontBody }}>&larr; Exit</button>
+        <button onClick={() => exitStudy()} style={{ background: "none", border: "none", color: T.textMid, fontSize: 13, fontWeight: 500, cursor: "pointer", padding: 0, fontFamily: T.fontBody }}>&larr; Exit</button>
         <div aria-live="polite" style={{ padding: "5px 14px", borderRadius: 20, background: T.card, border: `1px solid ${T.border}`, fontSize: 12, fontWeight: 600, color: T.textMid, fontFamily: T.fontBody, boxShadow: T.shadow1 }}>
           {studyIndex + 1} / {studyCards.length}
         </div>
@@ -128,7 +136,7 @@ export default function StudyView({
         opacity: cardPhase === "dismiss" ? 0 : 1,
         animation: cardPhase === "enter" ? "cardEnter 0.3s ease both" : "none",
       }}>
-        <FlipCard card={currentCard} flipped={flipped} onFlip={onFlip} />
+        <FlipCard card={currentCard} flipped={flipped} onFlip={onFlip} compact={inWindow} />
       </div>
 
       {/* UI below card — fades out on dismiss */}

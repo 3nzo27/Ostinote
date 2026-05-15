@@ -64,10 +64,22 @@
       "title": "Ostinote ${version}",
       "icon": "build/icon.png",
       "contents": [
-        { "x": 130, "y": 220, "type": "file" },
-        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+        {
+          "x": 130,
+          "y": 220,
+          "type": "file"
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
       ],
-      "window": { "width": 540, "height": 380 }
+      "window": {
+        "width": 540,
+        "height": 380
+      }
     },
     "win": {
       "icon": "build/icon.png",
@@ -95,8 +107,15 @@
     "@mlc-ai/web-llm": "^0.2.83",
     "electron-updater": "^6.8.3",
     "firebase": "^12.11.0",
+    "idb": "^8.0.3",
+    "pdfjs-dist": "^5.7.284",
+    "picomatch": "^4.0.4",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "react-rnd": "^10.5.3",
+    "rehype-raw": "^7.0.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

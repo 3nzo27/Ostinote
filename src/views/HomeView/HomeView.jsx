@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import useTheme from "../../theme/useTheme.js";
-import NavBar from "../../components/NavBar/NavBar.jsx";
+import TopBar from "../../components/TopBar/TopBar.jsx";
 import DeleteConfirmModal from "../../components/DeleteConfirmModal/DeleteConfirmModal.jsx";
 import OnboardingTooltip from "../../components/Onboarding/OnboardingTooltip.jsx";
 
@@ -13,7 +13,11 @@ export default function HomeView({ decks, calOffset, setCalOffset, confirmDelete
   const [tooltipVisible, setTooltipVisible] = useState(false);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   const hoverTimeout = useRef(null);
-  const containerStyle = { maxWidth: 640, margin: "0 auto", padding: "calc(24px + var(--sat)) calc(16px + var(--sar)) calc(24px + var(--sab)) calc(16px + var(--sal))", minHeight: "100vh", fontFamily: T.fontBody, background: T.bg };
+  // Page content container. Wider than before (1080px) so the dashboard
+  // fills meaningfully more of the viewport instead of feeling like a
+  // narrow column floating in a sea of empty space. Generous side
+  // padding so content doesn't kiss the viewport edges on smaller screens.
+  const containerStyle = { maxWidth: 1080, margin: "0 auto", padding: "calc(28px + var(--sat)) calc(32px + var(--sar)) calc(40px + var(--sab)) calc(32px + var(--sal))", fontFamily: T.fontBody, background: T.bg, width: "100%", boxSizing: "border-box" };
 
   const totalDue = decks.reduce((sum, d) => sum + d.cards.filter(c => c.nextReview <= Date.now()).length, 0);
 
@@ -55,14 +59,17 @@ export default function HomeView({ decks, calOffset, setCalOffset, confirmDelete
   );
 
   return (
-    <div style={containerStyle}>
+    <div style={{
+      minHeight: "100vh", background: T.bg,
+      display: "flex", flexDirection: "column",
+    }}>
       {pinnedDay !== null && (
         <div onClick={() => setPinnedDay(null)} style={{
           position: "fixed", inset: 0, zIndex: 999, cursor: "default"
         }} />
       )}
-      <NavBar view="home" onNavigate={onNavigate} onHelpOpen={onHelpOpen} />
-
+      <TopBar view="dashboard" onNavigate={onNavigate} />
+      <div style={containerStyle}>
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: 26, fontWeight: 700, color: T.text, fontFamily: T.font, marginBottom: 4 }}>
           Good {new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening"}
@@ -94,6 +101,15 @@ export default function HomeView({ decks, calOffset, setCalOffset, confirmDelete
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 16, animation: "fadeIn 0.4s ease" }}>
+
+        {/* Calendar + Recent Decks side-by-side on wide screens. The
+            grid auto-collapses to a single column below ~880px so the
+            layout still works in narrow Electron windows. */}
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))",
+          gap: 16,
+        }}>
 
         {/* Calendar */}
         {widgetBox(<>
@@ -301,6 +317,8 @@ export default function HomeView({ decks, calOffset, setCalOffset, confirmDelete
           )}
         </>)}
 
+        </div>{/* /Calendar + Recent Decks responsive grid */}
+
         {/* Export / Import */}
         <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 4 }}>
           <button onClick={exportData} style={{
@@ -333,6 +351,7 @@ export default function HomeView({ decks, calOffset, setCalOffset, confirmDelete
           onConfirm={() => { deleteDeck(confirmDeleteId); setConfirmDeleteId(null); }}
         />
       )}
+      </div>{/* /containerStyle */}
     </div>
   );
 }
