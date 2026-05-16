@@ -24,9 +24,9 @@ function saveExpandedSet(set) {
 function getSectionState() {
   try {
     const raw = localStorage.getItem(SECTIONS_KEY);
-    if (!raw) return { library: false, decks: false };
-    return { library: false, decks: false, ...JSON.parse(raw) };
-  } catch { return { library: false, decks: false }; }
+    if (!raw) return { library: false, ungrouped: false, groups: false, decks: false };
+    return { library: false, ungrouped: false, groups: false, decks: false, ...JSON.parse(raw) };
+  } catch { return { library: false, ungrouped: false, groups: false, decks: false }; }
 }
 function saveSectionState(state) {
   localStorage.setItem(SECTIONS_KEY, JSON.stringify(state));
@@ -41,6 +41,8 @@ export default function LibrarySidebar({
   onRenameDocument, onRenameDeck,
   onTagDocument, onTagDeck,
   onUploadClick,
+  groups, onCreateGroup, onRenameGroup, onDeleteGroup,
+  onAddToGroup, onRemoveFromGroup,
   onOpenSettings, onOpenProfile, onOpenHome,
   open, onToggleOpen,
 }) {
@@ -59,10 +61,15 @@ export default function LibrarySidebar({
   // Active drag source — tracked locally so we can dim the dragged row and
   // show a contextual "Drop here" label on the target. Cleared on dragend.
   const [dragSource, setDragSource] = useState(null);
+  const [creatingGroup, setCreatingGroup] = useState(false);
+  const [newGroupName, setNewGroupName] = useState("");
+  const newGroupInputRef = useRef(null);
   // Move modal: { type: "doc"|"deck"|"folder", id, name }
   const [moveTarget, setMoveTarget] = useState(null);
   // Tag editor modal: { type: "doc"|"deck", id, name, tags }
   const [tagTarget, setTagTarget] = useState(null);
+  // "Add to group" modal: { docId, docName }
+  const [addToGroupTarget, setAddToGroupTarget] = useState(null);
   const renameInputRef = useRef(null);
   const newFolderInputRef = useRef(null);
 
@@ -98,6 +105,9 @@ export default function LibrarySidebar({
   useEffect(() => {
     if (creatingFolder && newFolderInputRef.current) newFolderInputRef.current.focus();
   }, [creatingFolder]);
+  useEffect(() => {
+    if (creatingGroup && newGroupInputRef.current) newGroupInputRef.current.focus();
+  }, [creatingGroup]);
 
   // Pre-compute children maps for the tree
   const childFolders = useMemo(() => {
@@ -177,6 +187,7 @@ export default function LibrarySidebar({
     if (name) {
       if (renamingItem.type === "doc" && onRenameDocument) onRenameDocument(renamingItem.id, name);
       else if (renamingItem.type === "deck" && onRenameDeck) onRenameDeck(renamingItem.id, name);
+      else if (renamingItem.type === "group" && onRenameGroup) onRenameGroup(renamingItem.id, name);
     }
     setRenamingItem(null);
     setRenameValue("");
@@ -195,6 +206,16 @@ export default function LibrarySidebar({
     if (name) onCreateFolder(name, null);
     setCreatingFolder(false);
     setNewFolderName("");
+  };
+  const startCreateGroup = () => {
+    setCreatingGroup(true);
+    setNewGroupName("");
+  };
+  const commitCreateGroup = () => {
+    const name = newGroupName.trim();
+    if (name && onCreateGroup) onCreateGroup(name);
+    setCreatingGroup(false);
+    setNewGroupName("");
   };
 
   // Drag and drop
@@ -618,6 +639,127 @@ export default function LibrarySidebar({
     );
   };
 
+  const docsById = useMemo(() => {
+    const map = new Map();
+    documents.forEach(d => map.set(d.id, d));
+    return map;
+  }, [documents]);
+
+  const renderGroup = (group) => {
+    const isExpanded = expanded.has(`group:${group.id}`);
+    const isRenaming = renamingItem?.type === "group" && renamingItem.id === group.id;
+    const memberDocs = group.docIds.map(id => docsById.get(id)).filter(Boolean);
+
+    return (
+      <div key={group.id}>
+        <div
+          onClick={() => !isRenaming && setExpanded(prev => {
+            const next = new Set(prev);
+            const key = `group:${group.id}`;
+            if (next.has(key)) next.delete(key); else next.add(key);
+            return next;
+          })}
+          onContextMenu={e => {
+            e.preventDefault();
+            setContextMenu({ x: e.clientX, y: e.clientY, type: "group", id: group.id, name: group.name });
+          }}
+          style={{
+            display: "flex", alignItems: "center", gap: 6,
+            padding: "5px 10px",
+            borderRadius: 6, cursor: "pointer",
+            color: T.text, fontSize: 14, fontFamily: T.fontBody, fontWeight: 500,
+            userSelect: "none", transition: "background 0.15s",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = T.bgSub; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+        >
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" style={{
+            flexShrink: 0, transition: "transform 0.15s",
+            transform: isExpanded ? "rotate(90deg)" : "rotate(0)",
+            color: T.textLight
+          }}>
+            <polygon points="6 4 18 12 6 20" />
+          </svg>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={T.textMid} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+            <rect x="2" y="3" width="20" height="18" rx="3" />
+            <path d="M2 9h20" />
+          </svg>
+          {isRenaming ? (
+            <input
+              ref={renameInputRef}
+              value={renameValue}
+              onChange={e => setRenameValue(e.target.value)}
+              onBlur={commitItemRename}
+              onKeyDown={e => {
+                if (e.key === "Enter") commitItemRename();
+                if (e.key === "Escape") cancelItemRename();
+              }}
+              onClick={e => e.stopPropagation()}
+              style={inputStyle(T)}
+            />
+          ) : (
+            <>
+              <span style={{
+                flex: 1, minWidth: 0,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
+              }}>{group.name}</span>
+              <span style={{
+                flexShrink: 0, fontSize: 11, color: T.textLight, fontWeight: 500
+              }}>{memberDocs.length}</span>
+            </>
+          )}
+        </div>
+        <div style={{
+          display: "grid",
+          gridTemplateRows: isExpanded ? "1fr" : "0fr",
+          transition: "grid-template-rows 0.22s cubic-bezier(0.4, 0, 0.2, 1)",
+        }}>
+          <div style={{ minHeight: 0, overflow: "hidden" }}>
+            {memberDocs.length === 0 ? (
+              <div style={{
+                padding: "4px 10px 4px 38px",
+                fontSize: 12, color: T.textLight, fontStyle: "italic"
+              }}>Empty — right-click a doc to add it</div>
+            ) : (
+              memberDocs.map(doc => (
+                <div
+                  key={`${group.id}-${doc.id}`}
+                  onClick={() => onSelectDocument(doc.id)}
+                  onContextMenu={e => {
+                    e.preventDefault();
+                    setContextMenu({ x: e.clientX, y: e.clientY, type: "group-doc", groupId: group.id, docId: doc.id, name: doc.title });
+                  }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    padding: "5px 10px 5px 24px",
+                    borderRadius: 6, cursor: "pointer",
+                    background: selectedDocId === doc.id ? T.bgSub : "transparent",
+                    color: selectedDocId === doc.id ? T.text : T.textMid,
+                    fontSize: 13.5, fontFamily: T.fontBody,
+                    fontWeight: selectedDocId === doc.id ? 600 : 400,
+                    transition: "background 0.15s", userSelect: "none",
+                  }}
+                  onMouseEnter={e => { if (selectedDocId !== doc.id) e.currentTarget.style.background = T.bgSub; }}
+                  onMouseLeave={e => { if (selectedDocId !== doc.id) e.currentTarget.style.background = "transparent"; }}
+                >
+                  <span style={{ width: 10, flexShrink: 0 }} />
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                  </svg>
+                  <span style={{
+                    flex: 1, minWidth: 0,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
+                  }}>{doc.title}</span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const rootFolders = childFolders.get("root") || [];
   const rootDocs = docsByFolder.get("root") || [];
   // Decks at the library root deliberately don't render in the Library
@@ -735,49 +877,122 @@ export default function LibrarySidebar({
           />
         ) : (
           <>
-            {/* LIBRARY section — folder tree of docs (and decks inside folders).
-                Collapsable. Upload + New-Folder action buttons embedded in the header. */}
+            {/* UNGROUPED section — newly uploaded docs that aren't in any folder */}
+            <SectionHeader
+              label="Ungrouped" T={T}
+              collapsed={sections.ungrouped}
+              onToggle={() => toggleSection("ungrouped")}
+              actions={
+                <SectionAction T={T} title="Upload PDF" onClick={onUploadClick}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
+                  </svg>
+                </SectionAction>
+              }
+            />
+            <div style={{
+              display: "grid",
+              gridTemplateRows: sections.ungrouped ? "0fr" : "1fr",
+              transition: "grid-template-rows 0.22s cubic-bezier(0.4, 0, 0.2, 1)",
+            }}>
+              <div style={{ minHeight: 0, overflow: "hidden" }}>
+                {rootDocs.length === 0 ? (
+                  <div style={{
+                    padding: "6px 12px 12px", fontSize: 12.5, color: T.textLight,
+                    fontFamily: T.fontBody, lineHeight: 1.5
+                  }}>
+                    Upload a PDF — it will appear here until you file it into a folder.
+                  </div>
+                ) : (
+                  rootDocs.map(d => renderDoc(d, 0))
+                )}
+              </div>
+            </div>
+
+            {/* GROUPS section — lightweight tab groups */}
+            <div style={{ height: 12 }} />
+            <SectionHeader
+              label="Groups" T={T}
+              collapsed={sections.groups}
+              onToggle={() => toggleSection("groups")}
+              actions={
+                <SectionAction T={T} title="New group" onClick={startCreateGroup}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                </SectionAction>
+              }
+            />
+            <div style={{
+              display: "grid",
+              gridTemplateRows: sections.groups ? "0fr" : "1fr",
+              transition: "grid-template-rows 0.22s cubic-bezier(0.4, 0, 0.2, 1)",
+            }}>
+              <div style={{ minHeight: 0, overflow: "hidden" }}>
+                {(groups || []).length === 0 && !creatingGroup ? (
+                  <div style={{
+                    padding: "6px 12px 12px", fontSize: 12.5, color: T.textLight,
+                    fontFamily: T.fontBody, lineHeight: 1.5
+                  }}>
+                    Create a group to organize docs without moving them.
+                  </div>
+                ) : (
+                  (groups || []).map(group => renderGroup(group))
+                )}
+                {creatingGroup && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px" }}>
+                    <span style={{ width: 10, flexShrink: 0 }} />
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={T.textMid} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                      <rect x="2" y="3" width="20" height="18" rx="3" />
+                      <path d="M2 9h20" />
+                    </svg>
+                    <input
+                      ref={newGroupInputRef}
+                      value={newGroupName}
+                      onChange={e => setNewGroupName(e.target.value)}
+                      onBlur={commitCreateGroup}
+                      onKeyDown={e => {
+                        if (e.key === "Enter") commitCreateGroup();
+                        if (e.key === "Escape") { setCreatingGroup(false); setNewGroupName(""); }
+                      }}
+                      placeholder="Group name"
+                      style={inputStyle(T)}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* LIBRARY section — folder tree of docs (and decks inside folders) */}
+            <div style={{ height: 12 }} />
             <SectionHeader
               label="Library" T={T}
               collapsed={sections.library}
               onToggle={() => toggleSection("library")}
               actions={
-                <>
-                  <SectionAction T={T} title="Upload PDF" onClick={onUploadClick}>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
-                    </svg>
-                  </SectionAction>
-                  <SectionAction T={T} title="New folder" onClick={startCreateFolder}>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                      <line x1="12" y1="11" x2="12" y2="17" /><line x1="9" y1="14" x2="15" y2="14" />
-                    </svg>
-                  </SectionAction>
-                </>
+                <SectionAction T={T} title="New folder" onClick={startCreateFolder}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                    <line x1="12" y1="11" x2="12" y2="17" /><line x1="9" y1="14" x2="15" y2="14" />
+                  </svg>
+                </SectionAction>
               }
             />
-            {/* Section content uses the same grid 0fr→1fr animation trick
-                as the folder expand. `sections.library === true` means
-                COLLAPSED (the state key is inverted historically). */}
             <div style={{
               display: "grid",
               gridTemplateRows: sections.library ? "0fr" : "1fr",
               transition: "grid-template-rows 0.22s cubic-bezier(0.4, 0, 0.2, 1)",
             }}>
               <div style={{ minHeight: 0, overflow: "hidden" }}>
-                {rootFolders.length === 0 && rootDocs.length === 0 && !creatingFolder ? (
+                {rootFolders.length === 0 && !creatingFolder ? (
                   <div style={{
                     padding: "6px 12px 12px", fontSize: 12.5, color: T.textLight,
                     fontFamily: T.fontBody, lineHeight: 1.5
                   }}>
-                    Click <strong>↑</strong> to upload a PDF or <strong>+folder</strong> to start organizing.
+                    Click <strong>+folder</strong> to start organizing.
                   </div>
                 ) : (
-                  <>
-                    {rootFolders.map(f => renderFolder(f, 0))}
-                    {rootDocs.map(d => renderDoc(d, 0))}
-                  </>
+                  rootFolders.map(f => renderFolder(f, 0))
                 )}
                 {creatingFolder && (
                   <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px" }}>
@@ -839,12 +1054,13 @@ export default function LibrarySidebar({
         <ContextMenu
           x={contextMenu.x} y={contextMenu.y} T={T}
           items={buildContextMenuItems(contextMenu, {
-            folders, documents, decks,
+            folders, documents, decks, groups,
             onSelectDocument, onSelectDeck,
             onRenameDocument, onRenameDeck,
             onDeleteDocument, onDeleteDeck, onDeleteFolder,
+            onDeleteGroup, onRemoveFromGroup,
             startItemRename, startRename,
-            setMoveTarget, setTagTarget,
+            setMoveTarget, setTagTarget, setAddToGroupTarget,
           })}
         />
       )}
@@ -870,13 +1086,26 @@ export default function LibrarySidebar({
         <TagModal
           T={T}
           item={tagTarget}
-          // Suggest tags that already exist across documents and decks
           suggestions={collectTagSuggestions(documents, decks)}
           onCancel={() => setTagTarget(null)}
           onSave={(tags) => {
             if (tagTarget.type === "doc" && onTagDocument) onTagDocument(tagTarget.id, tags);
             else if (tagTarget.type === "deck" && onTagDeck) onTagDeck(tagTarget.id, tags);
             setTagTarget(null);
+          }}
+        />
+      )}
+
+      {/* Add to group modal */}
+      {addToGroupTarget && (
+        <AddToGroupModal
+          T={T}
+          docName={addToGroupTarget.docName}
+          groups={groups || []}
+          onCancel={() => setAddToGroupTarget(null)}
+          onSelect={(groupId) => {
+            if (onAddToGroup) onAddToGroup(groupId, addToGroupTarget.docId);
+            setAddToGroupTarget(null);
           }}
         />
       )}
@@ -891,12 +1120,28 @@ export default function LibrarySidebar({
 function buildContextMenuItems(contextMenu, h) {
   if (contextMenu.type === "document") {
     const doc = h.documents.find(d => d.id === contextMenu.id);
-    return [
+    const items = [
       { label: "Open",   onClick: () => h.onSelectDocument(contextMenu.id) },
       { label: "Rename", onClick: () => h.startItemRename("doc", contextMenu.id, contextMenu.name) },
       { label: "Move…",  onClick: () => h.setMoveTarget({ type: "doc", id: contextMenu.id, name: contextMenu.name, currentFolderId: doc?.folderId || null }) },
       { label: "Tag…",   onClick: () => h.setTagTarget({ type: "doc", id: contextMenu.id, name: contextMenu.name, tags: doc?.tags || [] }) },
-      { label: "Delete", danger: true, onClick: () => h.onDeleteDocument(contextMenu.id) },
+    ];
+    if (h.groups?.length > 0) {
+      items.push({ label: "Add to group…", onClick: () => h.setAddToGroupTarget({ docId: contextMenu.id, docName: contextMenu.name }) });
+    }
+    items.push({ label: "Delete", danger: true, onClick: () => h.onDeleteDocument(contextMenu.id) });
+    return items;
+  }
+  if (contextMenu.type === "group-doc") {
+    return [
+      { label: "Open",   onClick: () => h.onSelectDocument(contextMenu.docId) },
+      { label: "Remove from group", onClick: () => h.onRemoveFromGroup(contextMenu.groupId, contextMenu.docId) },
+    ];
+  }
+  if (contextMenu.type === "group") {
+    return [
+      { label: "Rename", onClick: () => h.startItemRename("group", contextMenu.id, contextMenu.name) },
+      { label: "Delete group", danger: true, onClick: () => h.onDeleteGroup(contextMenu.id) },
     ];
   }
   if (contextMenu.type === "deck") {
@@ -1440,6 +1685,55 @@ function ModalBtn({ T, primary, disabled, onClick, children }) {
       transition: "all 0.15s",
       opacity: disabled && !primary ? 0.5 : 1,
     }}>{children}</button>
+  );
+}
+
+function AddToGroupModal({ T, docName, groups, onCancel, onSelect }) {
+  return (
+    <ModalShell T={T} onCancel={onCancel} title={`Add "${docName}" to group`} maxWidth={360}>
+      <div style={{
+        maxHeight: 240, overflowY: "auto",
+        border: `1px solid ${T.border}`, borderRadius: T.radius,
+        background: T.inputBg
+      }}>
+        {groups.length === 0 ? (
+          <div style={{ padding: 14, fontSize: 12, color: T.textLight, textAlign: "center" }}>
+            No groups yet — create one first.
+          </div>
+        ) : (
+          groups.map(g => (
+            <button
+              key={g.id}
+              onClick={() => onSelect(g.id)}
+              style={{
+                display: "flex", alignItems: "center", gap: 8,
+                width: "100%", textAlign: "left",
+                padding: "10px 12px",
+                border: "none",
+                background: "transparent",
+                color: T.text, fontSize: 13, fontFamily: T.fontBody,
+                cursor: "pointer", transition: "background 0.1s",
+                borderBottom: `1px solid ${T.border}`
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = T.bgSub; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={T.textMid} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                <rect x="2" y="3" width="20" height="18" rx="3" />
+                <path d="M2 9h20" />
+              </svg>
+              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {g.name}
+              </span>
+              <span style={{ fontSize: 11, color: T.textLight }}>{g.docIds.length}</span>
+            </button>
+          ))
+        )}
+      </div>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+        <ModalBtn T={T} onClick={onCancel}>Cancel</ModalBtn>
+      </div>
+    </ModalShell>
   );
 }
 

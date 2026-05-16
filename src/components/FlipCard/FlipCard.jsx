@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import useTheme from "../../theme/useTheme.js";
 
-export default function FlipCard({ card, flipped, onFlip, style: wrapStyle = {}, compact = false }) {
+export default function FlipCard({ card, flipped, onFlip, style: wrapStyle = {} }) {
   const { T } = useTheme();
   const [cardHeight, setCardHeight] = useState(200);
   const [skipTransition, setSkipTransition] = useState(false);
@@ -66,17 +66,13 @@ export default function FlipCard({ card, flipped, onFlip, style: wrapStyle = {},
     );
   };
 
-  // `compact` flattens the card into its surroundings — no border, no
-  // shadow, transparent bg. Used inside the Tool Bar so the FlipCard
-  // doesn't read as a separate "box-in-a-box" against the Tool Bar's
-  // T.card background.
   const faceBase = {
     position: "absolute", top: 0, left: 0, width: "100%", minHeight: "100%",
     backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden",
-    borderRadius: compact ? 0 : T.radiusLg,
+    borderRadius: T.radiusLg,
     overflow: "hidden",
-    border: compact ? "none" : `1px solid ${T.borderStrong}`,
-    boxShadow: compact ? "none" : T.shadow3,
+    border: `1px solid ${T.borderStrong}`,
+    boxShadow: T.shadow2,
     boxSizing: "border-box",
   };
 
@@ -94,11 +90,8 @@ export default function FlipCard({ card, flipped, onFlip, style: wrapStyle = {},
         transition: skipTransition ? "none" : "transform 0.55s cubic-bezier(0.4,0,0.2,1)",
         transformStyle: "preserve-3d", transform: flipped ? "rotateY(180deg)" : "rotateY(0)"
       }}>
-        {/* In compact (Tool Bar) mode the faces inherit the parent's bg
-            so the card melts into its surroundings. In standalone mode
-            they keep their distinct card surfaces. */}
-        <div ref={frontRef} style={{ ...faceBase, background: compact ? "transparent" : T.card }}>{header("Front")}{renderSide(card.front)}</div>
-        <div ref={backRef} style={{ ...faceBase, background: compact ? "transparent" : T.cardAlt, transform: "rotateY(180deg)" }}>{header("Back")}{renderSide(card.back)}</div>
+        <div ref={frontRef} style={{ ...faceBase, background: T.card }}>{header("Front")}{renderSide(card.front)}</div>
+        <div ref={backRef} style={{ ...faceBase, background: T.cardAlt, transform: "rotateY(180deg)" }}>{header("Back")}{renderSide(card.back)}</div>
       </div>
     </div>
   );

@@ -36,6 +36,7 @@ const LEGACY_ACTIVE_TAB_KEY = "ostinote_workspace_activeTab";
 const LEGACY_SELECTED_DOC_KEY = "ostinote_workspace_selectedDocId";
 const LIBRARY_OPEN_KEY = "ostinote_workspace_libraryOpen";
 const STUDIO_OPEN_KEY = "ostinote_workspace_studioOpen";
+const GROUPS_KEY = "ostinote_workspace_groups";
 
 export default function WorkspaceView({
   decks, aiSettings, onAddCardToDeck,
@@ -91,6 +92,10 @@ export default function WorkspaceView({
     try { return JSON.parse(localStorage.getItem(STUDIO_OPEN_KEY) ?? "true"); }
     catch { return true; }
   });
+  const [groups, setGroups] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(GROUPS_KEY) || "[]"); }
+    catch { return []; }
+  });
   const fileInputRef = useRef(null);
 
   // ---- Document reader: docked / floating mode ----
@@ -109,6 +114,29 @@ export default function WorkspaceView({
   }, [selectedDeckId]);
   useEffect(() => { localStorage.setItem(LIBRARY_OPEN_KEY, JSON.stringify(libraryOpen)); }, [libraryOpen]);
   useEffect(() => { localStorage.setItem(STUDIO_OPEN_KEY, JSON.stringify(studioOpen)); }, [studioOpen]);
+  useEffect(() => { localStorage.setItem(GROUPS_KEY, JSON.stringify(groups)); }, [groups]);
+
+  const handleCreateGroup = useCallback((name) => {
+    setGroups(prev => [...prev, { id: crypto.randomUUID(), name, docIds: [] }]);
+  }, []);
+  const handleRenameGroup = useCallback((id, name) => {
+    setGroups(prev => prev.map(g => g.id === id ? { ...g, name } : g));
+  }, []);
+  const handleDeleteGroup = useCallback((id) => {
+    setGroups(prev => prev.filter(g => g.id !== id));
+  }, []);
+  const handleAddToGroup = useCallback((groupId, docId) => {
+    setGroups(prev => prev.map(g =>
+      g.id === groupId && !g.docIds.includes(docId)
+        ? { ...g, docIds: [...g.docIds, docId] }
+        : g
+    ));
+  }, []);
+  const handleRemoveFromGroup = useCallback((groupId, docId) => {
+    setGroups(prev => prev.map(g =>
+      g.id === groupId ? { ...g, docIds: g.docIds.filter(d => d !== docId) } : g
+    ));
+  }, []);
 
   // Initial library load + scrub stale ids against what's in the doc
   // store. The deck-id scrub runs in its own effect that watches the
@@ -454,6 +482,12 @@ export default function WorkspaceView({
           onDeleteDeck={onDeleteDeck}
           onDeleteDocument={handleDeleteDocument}
           onUploadClick={() => fileInputRef.current?.click()}
+          groups={groups}
+          onCreateGroup={handleCreateGroup}
+          onRenameGroup={handleRenameGroup}
+          onDeleteGroup={handleDeleteGroup}
+          onAddToGroup={handleAddToGroup}
+          onRemoveFromGroup={handleRemoveFromGroup}
           open={libraryOpen}
           onToggleOpen={() => setLibraryOpen(!libraryOpen)}
         />

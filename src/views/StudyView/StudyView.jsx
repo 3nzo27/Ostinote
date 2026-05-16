@@ -136,7 +136,7 @@ export default function StudyView({
         opacity: cardPhase === "dismiss" ? 0 : 1,
         animation: cardPhase === "enter" ? "cardEnter 0.3s ease both" : "none",
       }}>
-        <FlipCard card={currentCard} flipped={flipped} onFlip={onFlip} compact={inWindow} />
+        <FlipCard card={currentCard} flipped={flipped} onFlip={onFlip} />
       </div>
 
       {/* UI below card — fades out on dismiss */}
