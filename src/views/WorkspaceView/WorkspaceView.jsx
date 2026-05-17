@@ -631,9 +631,10 @@ export default function WorkspaceView({
                 position: "relative", zIndex: 1,
                 boxShadow: T.shadow1 || "0 2px 8px rgba(0,0,0,0.05)",
               }}>
-                {/* Scroll progress as a thin top-edge stripe inside the folder */}
+                {/* Scroll progress as a thin bottom-edge stripe — moved off
+                    the tab/body seam so the active tab merges seamlessly. */}
                 <div style={{
-                  position: "absolute", top: 0, left: 0, right: 0,
+                  position: "absolute", bottom: 0, left: 0, right: 0,
                   height: 2, pointerEvents: "none", zIndex: 3,
                 }}>
                   <div style={{
@@ -788,7 +789,7 @@ function DocTabStrip({ T, openDocIds, activeDocId, loadedDocs, documents, onSele
       position: "relative", zIndex: 2,
       flexShrink: 0,
       display: "flex", alignItems: "flex-end",
-      paddingLeft: 6, paddingRight: 6,
+      paddingLeft: 0, paddingRight: 6,
       gap: 2,
       overflowX: "auto", overflowY: "visible",
     }}>
@@ -821,8 +822,9 @@ function DocTabStrip({ T, openDocIds, activeDocId, loadedDocs, documents, onSele
               position: "relative",
               zIndex: isActive ? 3 : 1,
               // Active tab covers the folder body's top border so the two
-              // pieces read as one continuous shape.
-              marginBottom: isActive ? -1.5 : 0,
+              // pieces read as one continuous shape. -2 (not -1.5) so
+              // subpixel rounding never leaves a hairline gap.
+              marginBottom: isActive ? -2 : 0,
               boxShadow: isActive ? "0 -1px 2px rgba(0,0,0,0.04)" : "none",
               transition: "background 0.15s, color 0.15s, padding 0.15s",
               flexShrink: 0,
