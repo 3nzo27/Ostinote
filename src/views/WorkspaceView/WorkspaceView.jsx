@@ -600,67 +600,96 @@ export default function WorkspaceView({
           background: T.bg
         }}>
           {openDocIds.length > 0 ? (
-            <>
-              {/* Tab strip — one tab per open document. Active tab drives
-                  the reader content. Decks go to the Tool Bar instead. */}
+            // Manila-folder layout: tabs sit on top of the folder body
+            // like the label tabs on a physical file folder. The active
+            // tab's color matches the body so they read as one piece.
+            <div style={{
+              flex: 1, minHeight: 0, minWidth: 0,
+              display: "flex", flexDirection: "column",
+              padding: "10px 14px 14px",
+            }}>
               <DocTabStrip
                 T={T}
                 openDocIds={openDocIds}
                 activeDocId={activeDocId}
                 loadedDocs={loadedDocs}
                 documents={documents}
-                progress={progress}
                 onSelect={setActiveDocId}
                 onClose={closeDocTab}
               />
 
-              {/* Reader pane — YouTube / PDF / Markdown. */}
-              {activeDoc ? (
-                activeDoc.type === "youtube" ? (
-                  <VideoViewer
-                    ref={videoRef}
-                    doc={activeDoc}
-                    onHighlight={(sel) => setSelectionPopover(sel)}
-                    onScrollProgress={setProgress}
-                  />
-                ) : activeDoc.hasPdf ? (
-                  pdfBuffers[activeDoc.id] ? (
-                    <PdfViewer
-                      ref={pdfViewerRef}
-                      buffer={pdfBuffers[activeDoc.id]}
-                      highlights={highlights}
+              {/* Folder body — wraps the reader content. Flat top (tabs
+                  attach here), rounded bottom corners. Thin border + soft
+                  shadow gives the paper-folder feel without being loud. */}
+              <div style={{
+                flex: 1, minHeight: 0, minWidth: 0,
+                display: "flex", flexDirection: "column",
+                background: T.card,
+                border: `1.5px solid ${T.borderStrong}`,
+                borderRadius: "0 12px 12px 12px",
+                overflow: "hidden",
+                position: "relative", zIndex: 1,
+                boxShadow: T.shadow1 || "0 2px 8px rgba(0,0,0,0.05)",
+              }}>
+                {/* Scroll progress as a thin top-edge stripe inside the folder */}
+                <div style={{
+                  position: "absolute", top: 0, left: 0, right: 0,
+                  height: 2, pointerEvents: "none", zIndex: 3,
+                }}>
+                  <div style={{
+                    width: `${(progress || 0) * 100}%`, height: "100%",
+                    background: T.good, transition: "width 0.1s ease",
+                  }} />
+                </div>
+
+                {/* Reader pane — YouTube / PDF / Markdown. */}
+                {activeDoc ? (
+                  activeDoc.type === "youtube" ? (
+                    <VideoViewer
+                      ref={videoRef}
+                      doc={activeDoc}
                       onHighlight={(sel) => setSelectionPopover(sel)}
                       onScrollProgress={setProgress}
                     />
+                  ) : activeDoc.hasPdf ? (
+                    pdfBuffers[activeDoc.id] ? (
+                      <PdfViewer
+                        ref={pdfViewerRef}
+                        buffer={pdfBuffers[activeDoc.id]}
+                        highlights={highlights}
+                        onHighlight={(sel) => setSelectionPopover(sel)}
+                        onScrollProgress={setProgress}
+                      />
+                    ) : (
+                      <div style={{
+                        flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+                        color: T.textLight, fontSize: 13, fontFamily: T.fontBody,
+                      }}>Loading PDF…</div>
+                    )
                   ) : (
-                    <div style={{
-                      flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
-                      color: T.textLight, fontSize: 13, fontFamily: T.fontBody,
-                    }}>Loading PDF…</div>
+                    <div ref={readerRef} style={{
+                      flex: 1, overflowY: "auto", padding: "32px 24px 80px",
+                      minHeight: 0,
+                    }}>
+                      <article style={{ maxWidth: 720, margin: "0 auto", width: "100%" }}>
+                        <h1 style={{
+                          fontSize: 32, fontWeight: 700, color: T.text, fontFamily: T.font,
+                          marginBottom: 24, letterSpacing: -0.4, lineHeight: 1.2
+                        }}>{activeDoc.title}</h1>
+                        <Markdown markdown={markdownWithHighlights} />
+                      </article>
+                    </div>
                   )
                 ) : (
-                  <div ref={readerRef} style={{
-                    flex: 1, overflowY: "auto", padding: "32px 24px 80px",
-                    minHeight: 0,
+                  <div style={{
+                    flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+                    color: T.textLight, fontSize: 13, fontFamily: T.fontBody,
                   }}>
-                    <article style={{ maxWidth: 720, margin: "0 auto", width: "100%" }}>
-                      <h1 style={{
-                        fontSize: 32, fontWeight: 700, color: T.text, fontFamily: T.font,
-                        marginBottom: 24, letterSpacing: -0.4, lineHeight: 1.2
-                      }}>{activeDoc.title}</h1>
-                      <Markdown markdown={markdownWithHighlights} />
-                    </article>
+                    Loading…
                   </div>
-                )
-              ) : (
-                <div style={{
-                  flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
-                  color: T.textLight, fontSize: 13, fontFamily: T.fontBody,
-                }}>
-                  Loading…
-                </div>
-              )}
-            </>
+                )}
+              </div>
+            </div>
           ) : (
             <EmptyMiddle
               T={T}
@@ -747,103 +776,100 @@ export default function WorkspaceView({
 
 // ---- Subcomponents ----
 
-// Tab strip rendered at the top of the reader pane — one tab per open
-// document. Outlined-pill style shared with the Tool Bar tab strip.
-function DocTabStrip({ T, openDocIds, activeDocId, loadedDocs, documents, progress, onSelect, onClose }) {
+// Manila-folder-style tab strip — each tab is a rounded-top label that
+// sits on top of the folder body below. The active tab's color and
+// border match the body so they read as one continuous piece of paper;
+// inactive tabs sit slightly recessed (T.bgSub) like rear folder labels.
+function DocTabStrip({ T, openDocIds, activeDocId, loadedDocs, documents, onSelect, onClose }) {
   const titleFor = (id) =>
     loadedDocs[id]?.title || documents.find(d => d.id === id)?.title || "Untitled";
   return (
     <div style={{
-      position: "relative",
+      position: "relative", zIndex: 2,
       flexShrink: 0,
-      background: T.card,
-      borderBottom: `1px solid ${T.border}`,
+      display: "flex", alignItems: "flex-end",
+      paddingLeft: 6, paddingRight: 6,
+      gap: 2,
+      overflowX: "auto", overflowY: "visible",
     }}>
-      <div style={{
-        display: "flex", alignItems: "center",
-        padding: "8px 12px", gap: 6,
-        overflowX: "auto", overflowY: "hidden",
-      }}>
-        {openDocIds.map(id => {
-          const isActive = id === activeDocId;
-          const title = titleFor(id);
-          return (
-            <div
-              key={id}
-              onClick={() => onSelect(id)}
-              role="tab"
-              aria-selected={isActive}
-              title={title}
+      {openDocIds.map(id => {
+        const isActive = id === activeDocId;
+        const title = titleFor(id);
+        const isYoutube = loadedDocs[id]?.type === "youtube";
+        return (
+          <div
+            key={id}
+            onClick={() => onSelect(id)}
+            role="tab"
+            aria-selected={isActive}
+            title={title}
+            style={{
+              display: "flex", alignItems: "center", gap: 8,
+              padding: isActive ? "9px 14px 11px" : "7px 12px 8px",
+              borderTopLeftRadius: 10, borderTopRightRadius: 10,
+              borderBottomLeftRadius: 0, borderBottomRightRadius: 0,
+              borderTop: `1.5px solid ${T.borderStrong}`,
+              borderLeft: `1.5px solid ${T.borderStrong}`,
+              borderRight: `1.5px solid ${T.borderStrong}`,
+              borderBottom: isActive ? "none" : `1.5px solid ${T.borderStrong}`,
+              background: isActive ? T.card : T.bgSub,
+              color: isActive ? T.text : T.textLight,
+              fontSize: 12, fontWeight: 600,
+              fontFamily: T.fontBody,
+              maxWidth: 220, minWidth: 110,
+              cursor: "pointer",
+              position: "relative",
+              zIndex: isActive ? 3 : 1,
+              // Active tab covers the folder body's top border so the two
+              // pieces read as one continuous shape.
+              marginBottom: isActive ? -1.5 : 0,
+              boxShadow: isActive ? "0 -1px 2px rgba(0,0,0,0.04)" : "none",
+              transition: "background 0.15s, color 0.15s, padding 0.15s",
+              flexShrink: 0,
+            }}
+            onMouseEnter={e => {
+              if (!isActive) { e.currentTarget.style.background = T.card; e.currentTarget.style.color = T.textMid; }
+            }}
+            onMouseLeave={e => {
+              if (!isActive) { e.currentTarget.style.background = T.bgSub; e.currentTarget.style.color = T.textLight; }
+            }}
+          >
+            {isYoutube ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+              </svg>
+            )}
+            <span style={{
+              flex: 1, minWidth: 0,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>{title}</span>
+            <button
+              onClick={(e) => { e.stopPropagation(); onClose(id); }}
+              onMouseDown={(e) => e.stopPropagation()}
+              aria-label={`Close ${title}`}
               style={{
-                display: "flex", alignItems: "center", gap: 6,
-                padding: "6px 8px 6px 10px",
-                borderRadius: 8,
-                border: isActive ? `1.5px solid ${T.borderStrong}` : "1.5px solid transparent",
-                background: isActive ? T.bgSub : "transparent",
-                cursor: "pointer",
-                color: isActive ? T.text : T.textLight,
-                fontSize: 12, fontWeight: 600,
-                fontFamily: T.fontBody,
-                maxWidth: 220, minWidth: 80,
-                transition: "all 0.15s",
-                flexShrink: 0,
+                width: 18, height: 18, borderRadius: 4, border: "none",
+                background: "transparent", color: "inherit",
+                cursor: "pointer", padding: 0, flexShrink: 0,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                opacity: 0.55,
+                transition: "opacity 0.12s, background 0.12s",
               }}
-              onMouseEnter={e => {
-                if (!isActive) {
-                  e.currentTarget.style.background = T.bgSub;
-                  e.currentTarget.style.color = T.textMid;
-                }
-              }}
-              onMouseLeave={e => {
-                if (!isActive) {
-                  e.currentTarget.style.background = "transparent";
-                  e.currentTarget.style.color = T.textLight;
-                }
-              }}
+              onMouseEnter={e => { e.currentTarget.style.background = T.bg; e.currentTarget.style.opacity = "1"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.opacity = "0.55"; }}
             >
-              {loadedDocs[id]?.type === "youtube" ? (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                  <polygon points="5 3 19 12 5 21 5 3" />
-                </svg>
-              ) : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                </svg>
-              )}
-              <span style={{
-                flex: 1, minWidth: 0,
-                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-              }}>{title}</span>
-              <button
-                onClick={(e) => { e.stopPropagation(); onClose(id); }}
-                onMouseDown={(e) => e.stopPropagation()}
-                aria-label={`Close ${title}`}
-                style={{
-                  width: 18, height: 18, borderRadius: 4, border: "none",
-                  background: "transparent", color: "inherit",
-                  cursor: "pointer", padding: 0, flexShrink: 0,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  opacity: 0.55,
-                  transition: "opacity 0.12s, background 0.12s",
-                }}
-                onMouseEnter={e => { e.currentTarget.style.background = T.bgSub; e.currentTarget.style.opacity = "1"; }}
-                onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.opacity = "0.55"; }}
-              >
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </div>
-          );
-        })}
-      </div>
-      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 2, pointerEvents: "none" }}>
-        <div style={{
-          width: `${(progress || 0) * 100}%`, height: "100%",
-          background: T.good, transition: "width 0.1s ease",
-        }} />
-      </div>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }
