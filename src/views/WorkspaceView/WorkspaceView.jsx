@@ -777,10 +777,9 @@ export default function WorkspaceView({
 
 // ---- Subcomponents ----
 
-// Floating-bubble tab strip — each open doc is rendered as a pill chip
-// that hovers above the workspace panel below. Active bubble is lifted
-// slightly (stronger shadow + opaque card bg); inactive bubbles are
-// lighter / more recessed.
+// Doc tab strip — same outlined-pill spec as the Tool Bar tabs so the
+// two strips read as one design system. Adds icon + close button for
+// the multi-doc reader case (Tool Bar tabs don't need those).
 function DocTabStrip({ T, openDocIds, activeDocId, loadedDocs, documents, onSelect, onClose }) {
   const titleFor = (id) =>
     loadedDocs[id]?.title || documents.find(d => d.id === id)?.title || "Untitled";
@@ -788,13 +787,11 @@ function DocTabStrip({ T, openDocIds, activeDocId, loadedDocs, documents, onSele
     <div style={{
       flexShrink: 0,
       display: "flex", alignItems: "center",
-      paddingLeft: 2, paddingRight: 6,
-      paddingTop: 2, paddingBottom: 2,  // breathing room so shadows don't clip
-      gap: 8,
-      overflowX: "auto", overflowY: "visible",
+      gap: 6,
+      overflowX: "auto", overflowY: "hidden",
     }}>
       {openDocIds.map(id => {
-        const isActive = id === activeDocId;
+        const active = id === activeDocId;
         const title = titleFor(id);
         const isYoutube = loadedDocs[id]?.type === "youtube";
         return (
@@ -802,41 +799,33 @@ function DocTabStrip({ T, openDocIds, activeDocId, loadedDocs, documents, onSele
             key={id}
             onClick={() => onSelect(id)}
             role="tab"
-            aria-selected={isActive}
+            aria-selected={active}
             title={title}
             style={{
-              display: "flex", alignItems: "center", gap: 8,
-              padding: "6px 12px 6px 12px",
-              borderRadius: 999,
-              border: `1px solid ${isActive ? T.borderStrong : T.border}`,
-              background: isActive ? T.card : T.bgSub,
-              color: isActive ? T.text : T.textMid,
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "6px 10px",
+              borderRadius: 8,
+              border: active ? `1.5px solid ${T.borderStrong}` : "1.5px solid transparent",
+              background: active ? T.bgSub : "transparent",
+              color: active ? T.text : T.textLight,
               fontSize: 12, fontWeight: 600,
               fontFamily: T.fontBody,
-              maxWidth: 220, minWidth: 90,
+              maxWidth: 220, minWidth: 80,
               cursor: "pointer",
-              // Lift the active bubble with a stronger shadow; inactive
-              // bubbles have a lighter shadow so they still feel floating.
-              boxShadow: isActive
-                ? (T.shadow2 || "0 4px 10px rgba(0,0,0,0.10)")
-                : (T.shadow1 || "0 1px 3px rgba(0,0,0,0.06)"),
-              transform: isActive ? "translateY(-1px)" : "translateY(0)",
-              transition: "background 0.15s, color 0.15s, border-color 0.15s, transform 0.15s, box-shadow 0.15s",
+              transition: "all 0.15s",
               flexShrink: 0,
               userSelect: "none",
             }}
             onMouseEnter={e => {
-              if (!isActive) {
-                e.currentTarget.style.background = T.card;
-                e.currentTarget.style.color = T.text;
-                e.currentTarget.style.transform = "translateY(-1px)";
+              if (!active) {
+                e.currentTarget.style.background = T.bgSub;
+                e.currentTarget.style.color = T.textMid;
               }
             }}
             onMouseLeave={e => {
-              if (!isActive) {
-                e.currentTarget.style.background = T.bgSub;
-                e.currentTarget.style.color = T.textMid;
-                e.currentTarget.style.transform = "translateY(0)";
+              if (!active) {
+                e.currentTarget.style.background = "transparent";
+                e.currentTarget.style.color = T.textLight;
               }
             }}
           >
@@ -859,17 +848,17 @@ function DocTabStrip({ T, openDocIds, activeDocId, loadedDocs, documents, onSele
               onMouseDown={(e) => e.stopPropagation()}
               aria-label={`Close ${title}`}
               style={{
-                width: 18, height: 18, borderRadius: "50%", border: "none",
+                width: 16, height: 16, borderRadius: 4, border: "none",
                 background: "transparent", color: "inherit",
-                cursor: "pointer", padding: 0, flexShrink: 0,
+                cursor: "pointer", padding: 0, flexShrink: 0, marginLeft: 2,
                 display: "flex", alignItems: "center", justifyContent: "center",
-                opacity: 0.55,
+                opacity: 0.5,
                 transition: "opacity 0.12s, background 0.12s",
               }}
               onMouseEnter={e => { e.currentTarget.style.background = T.bg; e.currentTarget.style.opacity = "1"; }}
-              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.opacity = "0.55"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.opacity = "0.5"; }}
             >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
               </svg>
             </button>
