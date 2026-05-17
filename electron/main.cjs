@@ -232,6 +232,26 @@ ipcMain.handle("ai:complete", async (_evt, { prompt, model }) => {
   return text.trimEnd();
 });
 
+// YouTube transcript + video-info (mirrors /_yt/* Vite plugin endpoints)
+ipcMain.handle("yt:transcript", async (_evt, { videoId }) => {
+  if (!videoId || typeof videoId !== "string") {
+    throw new Error("videoId must be a non-empty string");
+  }
+  const { YoutubeTranscript } = require("youtube-transcript");
+  return YoutubeTranscript.fetchTranscript(videoId);
+});
+
+ipcMain.handle("yt:video-info", async (_evt, { videoId }) => {
+  if (!videoId || typeof videoId !== "string") {
+    throw new Error("videoId must be a non-empty string");
+  }
+  const res = await fetch(
+    `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`
+  );
+  if (!res.ok) throw new Error("Could not fetch video info");
+  return res.json();
+});
+
 // ---------------------------------------------------------------------------
 
 app.whenReady().then(() => {

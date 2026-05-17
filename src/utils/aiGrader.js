@@ -65,9 +65,10 @@ const PROVIDERS = {
   },
 };
 
-async function callAnthropic(apiKey, model, prompt) {
+async function callAnthropic(apiKey, model, prompt, { maxTokens = 1000, signal } = {}) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
+    signal,
     headers: {
       "Content-Type": "application/json",
       "x-api-key": apiKey,
@@ -76,7 +77,7 @@ async function callAnthropic(apiKey, model, prompt) {
     },
     body: JSON.stringify({
       model,
-      max_tokens: 1000,
+      max_tokens: maxTokens,
       messages: [{ role: "user", content: prompt }],
     }),
   });
@@ -85,21 +86,20 @@ async function callAnthropic(apiKey, model, prompt) {
   return data.content?.map(b => b.text || "").join("") || "";
 }
 
-async function callOpenAI(apiKey, model, prompt) {
-  // GPT-5 and reasoning-family models (o1/o3/o4) prefer `max_completion_tokens`
-  // over the legacy `max_tokens` field. Detect and route accordingly.
+async function callOpenAI(apiKey, model, prompt, { maxTokens = 1000, signal } = {}) {
   const isNewFamily = /^(gpt-5|o[134])/i.test(model);
   const tokenField = isNewFamily ? "max_completion_tokens" : "max_tokens";
 
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
+    signal,
     headers: {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
       model,
-      [tokenField]: 1000,
+      [tokenField]: maxTokens,
       messages: [{ role: "user", content: prompt }],
     }),
   });
@@ -108,15 +108,16 @@ async function callOpenAI(apiKey, model, prompt) {
   return data.choices?.[0]?.message?.content || "";
 }
 
-async function callGoogle(apiKey, model, prompt) {
+async function callGoogle(apiKey, model, prompt, { maxTokens = 1000, signal } = {}) {
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
     {
       method: "POST",
+      signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: 1000 },
+        generationConfig: { maxOutputTokens: maxTokens },
       }),
     }
   );
@@ -131,17 +132,24 @@ async function callGoogle(apiKey, model, prompt) {
 //   2. Vite dev: `POST /_ai/complete` served by vite-plugin-claude-bridge
 // Both wrap the same underlying `claude --print` invocation in the Node
 // side of the build, so behavior is identical.
-async function callClaudeLocal(model, prompt) {
-  // Prefer Electron's IPC when it's available — it's slightly cheaper than
-  // a fetch round-trip and works in the packaged build too.
+async function callClaudeLocal(model, prompt, { signal } = {}) {
   const electronBridge = typeof window !== "undefined" ? window.ostinoteAI : null;
   if (electronBridge?.complete) {
-    return electronBridge.complete({ prompt, model });
+    const p = electronBridge.complete({ prompt, model });
+    if (signal) {
+      return Promise.race([
+        p,
+        new Promise((_, reject) => {
+          if (signal.aborted) reject(new DOMException("Aborted", "AbortError"));
+          signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        }),
+      ]);
+    }
+    return p;
   }
-  // Fallback: the Vite dev server's /_ai/complete endpoint. Only present
-  // when running `npm run dev` (or `electron:dev` which builds, not dev).
   const res = await fetch("/_ai/complete", {
     method: "POST",
+    signal,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prompt, model }),
   });
@@ -185,14 +193,33 @@ export async function isClaudeLocalAvailable() {
 
 // Generic text-completion across providers — used by features beyond grading
 // (PDF→Markdown conversion, summarization, etc).
-export async function callAi(settings, prompt) {
+export async function callAi(settings, prompt, options = {}) {
   const { provider, apiKey, model } = settings;
-  if (provider === "claude-local") return callClaudeLocal(model, prompt);
-  if (!apiKey) throw new Error("No API key configured");
-  if (provider === "anthropic") return callAnthropic(apiKey, model, prompt);
-  if (provider === "openai") return callOpenAI(apiKey, model, prompt);
-  if (provider === "google") return callGoogle(apiKey, model, prompt);
-  throw new Error("Unknown provider");
+  const { maxTokens = 1000, signal, timeout = 180000 } = options;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  if (signal) {
+    if (signal.aborted) { clearTimeout(timer); throw new DOMException("Aborted", "AbortError"); }
+    signal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+  const opts = { maxTokens, signal: controller.signal };
+
+  try {
+    if (provider === "claude-local") return await callClaudeLocal(model, prompt, opts);
+    if (!apiKey) throw new Error("No API key configured");
+    if (provider === "anthropic") return await callAnthropic(apiKey, model, prompt, opts);
+    if (provider === "openai") return await callOpenAI(apiKey, model, prompt, opts);
+    if (provider === "google") return await callGoogle(apiKey, model, prompt, opts);
+    throw new Error("Unknown provider");
+  } catch (err) {
+    if (err.name === "AbortError" && !signal?.aborted) {
+      throw new Error("AI request timed out — try a smaller PDF or check your connection.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function gradeAnswer(settings, prompt) {

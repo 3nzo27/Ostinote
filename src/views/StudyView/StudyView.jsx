@@ -18,7 +18,7 @@ export default function StudyView({
     : { maxWidth: 640, margin: "0 auto", padding: "calc(24px + var(--sat)) calc(16px + var(--sar)) calc(24px + var(--sab)) calc(16px + var(--sal))", minHeight: "100vh", fontFamily: T.fontBody, background: T.bg };
   // Exit handler — fullscreen study calls exitStudy(); in-window
   // study calls a no-arg goBackToList passed via onNavigate.
-  const exitStudy = () => inWindow ? onNavigate() : exitStudy();
+  const exitStudy = () => inWindow ? onNavigate() : onNavigate("deck");
 
   const guessInputRef = useRef(null);
   useEffect(() => {

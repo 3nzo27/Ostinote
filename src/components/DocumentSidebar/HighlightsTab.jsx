@@ -1,6 +1,7 @@
 import { useState } from "react";
 import useTheme from "../../theme/useTheme.js";
 import { deleteHighlight } from "../../utils/documentStore.js";
+import { formatTimestamp } from "../../utils/youtubeTranscript.js";
 import DeckPickerModal from "./DeckPickerModal.jsx";
 
 export default function HighlightsTab({ doc, highlights, setHighlights, decks, onAddCardToDeck, onScrollToPage }) {
@@ -70,7 +71,7 @@ export default function HighlightsTab({ doc, highlights, setHighlights, decks, o
             }}>
               {h.page != null && (
                 <button onClick={() => onScrollToPage(h.page)} style={chipBtn(T)}>
-                  Page {h.page}
+                  {doc?.type === "youtube" ? formatTimestamp(h.page) : `Page ${h.page}`}
                 </button>
               )}
               <button onClick={() => handleMakeFlashcard(h)} style={chipBtn(T)}>

@@ -1,20 +1,20 @@
 // Vite dev-server plugin that exposes the locally-installed `claude` CLI
-// to the browser through two endpoints on the same origin as the dev
-// server. Lets the Vite-served app (http://localhost:5173) run prompts
-// without needing the Electron preload bridge.
+// and YouTube transcript/info proxies to the browser through endpoints on
+// the same origin as the dev server.
 //
-//   GET  /_ai/available  →  { ok: true|false }
-//   POST /_ai/complete   →  { prompt, model? }  body
-//                          200 text response
-//                          400/500 on error
+//   GET  /_ai/available      →  { ok: true|false }
+//   POST /_ai/complete       →  { prompt, model? }  body → text
+//   POST /_yt/transcript     →  { videoId }  body → [{ text, offset, duration }]
+//   GET  /_yt/video-info?v=  →  { title, author_name, thumbnail_url }
 //
 // Dev only — Vite plugins don't run in production builds. The Electron
-// path (window.ostinoteAI) is still preferred when present; this is the
-// fallback for browser testing.
+// path (window.ostinoteAI / window.ostinoteYT) is preferred when present;
+// this is the fallback for browser testing.
 
 import { spawn } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
+import { YoutubeTranscript } from "youtube-transcript";
 
 function findClaudeBinary() {
   const home = process.env.HOME || os.homedir();
@@ -85,6 +85,44 @@ export default function claudeBridge() {
     name: "ostinote-claude-bridge",
     apply: "serve", // dev only — no-op in `vite build`
     configureServer(server) {
+      // YouTube transcript + video-info proxy
+      server.middlewares.use(async (req, res, next) => {
+        if (!req.url || !req.url.startsWith("/_yt/")) return next();
+
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+        if (req.method === "OPTIONS") { res.statusCode = 204; res.end(); return; }
+
+        try {
+          if (req.url === "/_yt/transcript" && req.method === "POST") {
+            const body = await readBody(req);
+            const videoId = typeof body.videoId === "string" ? body.videoId : null;
+            if (!videoId) { res.statusCode = 400; res.end("videoId is required"); return; }
+            const segments = await YoutubeTranscript.fetchTranscript(videoId);
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify(segments));
+            return;
+          }
+          const infoMatch = req.url.match(/^\/_yt\/video-info\?v=([A-Za-z0-9_-]+)/);
+          if (infoMatch) {
+            const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${infoMatch[1]}&format=json`;
+            const resp = await fetch(oembedUrl);
+            if (!resp.ok) { res.statusCode = 404; res.end("Video not found"); return; }
+            const data = await resp.json();
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ title: data.title, author_name: data.author_name, thumbnail_url: data.thumbnail_url }));
+            return;
+          }
+          res.statusCode = 404;
+          res.end();
+        } catch (e) {
+          res.statusCode = 500;
+          res.end(String(e?.message || e));
+        }
+      });
+
+      // Claude AI bridge
       server.middlewares.use(async (req, res, next) => {
         if (!req.url || !req.url.startsWith("/_ai/")) return next();
 

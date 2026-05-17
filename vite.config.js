@@ -12,6 +12,9 @@ export default defineConfig(({ mode }) => ({
   define: {
     __DEV_BUILD__: JSON.stringify(mode === 'development'),
   },
+  server: {
+    host: true,
+  },
   optimizeDeps: {
     // WebLLM is heavy and dynamically imported only inside the Local AI Lab.
     // Excluding from pre-bundling speeds up dev startup.

@@ -12,7 +12,6 @@ import DeckView from "./views/DeckView/DeckView.jsx";
 import AddCardView from "./views/AddCardView/AddCardView.jsx";
 import EditCardView from "./views/EditCardView/EditCardView.jsx";
 import StudyView from "./views/StudyView/StudyView.jsx";
-import DirectedStudyConfigView from "./views/DirectedStudyConfigView/DirectedStudyConfigView.jsx";
 import DirectedStudySessionView from "./views/DirectedStudySessionView/DirectedStudySessionView.jsx";
 import DirectedStudyResultsView from "./views/DirectedStudyResultsView/DirectedStudyResultsView.jsx";
 import SettingsView from "./views/SettingsView/SettingsView.jsx";
@@ -578,7 +577,20 @@ Respond ONLY with valid JSON, no markdown backticks, in this exact format:
   const closeHelp = useCallback(() => setShowHelp(false), []);
 
   // --- Navigation ---
-  const onNavigate = (v) => setView(v);
+  // The Flashcards page has two in-page tabs: Decks and Focus Study.
+  // We treat the legacy "directed" route as a shortcut to the
+  // Flashcards page with the Focus Study tab pre-selected so existing
+  // call sites (results screen, session exit) keep working.
+  const [flashcardTab, setFlashcardTab] = useState("decks");
+  const onNavigate = (v) => {
+    if (v === "directed") {
+      setFlashcardTab("focusStudy");
+      setView("decks");
+      return;
+    }
+    if (v === "decks") setFlashcardTab("decks");
+    setView(v);
+  };
   const onSelectDeck = (deckId) => { setActiveDeckId(deckId); setView("deck"); };
 
   // --- View Router ---
@@ -631,6 +643,14 @@ Respond ONLY with valid JSON, no markdown backticks, in this exact format:
       deleteDeck={deleteDeck}
       onSelectDeck={onSelectDeck} onNavigate={onNavigate}
       onHelpOpen={openHelp}
+      activeTab={flashcardTab} setActiveTab={setFlashcardTab}
+      dsConfig={dsConfig} setDsConfig={setDsConfig}
+      dsMode={dsMode} setDsMode={setDsMode}
+      allTags={allTags}
+      dsExpandedRow={dsExpandedRow} setDsExpandedRow={setDsExpandedRow}
+      dsDeckFilter={dsDeckFilter} setDsDeckFilter={setDsDeckFilter}
+      dsTagFilter={dsTagFilter} setDsTagFilter={setDsTagFilter}
+      startDirectedStudy={startDirectedStudy} startShuffleStudy={startShuffleStudy}
     />;
   }
 
@@ -668,20 +688,6 @@ Respond ONLY with valid JSON, no markdown backticks, in this exact format:
     />;
   }
 
-  if (view === "directed") {
-    return <DirectedStudyConfigView
-      decks={decks} dsConfig={dsConfig} setDsConfig={setDsConfig}
-      dsMode={dsMode} setDsMode={setDsMode}
-      allTags={allTags}
-      dsExpandedRow={dsExpandedRow} setDsExpandedRow={setDsExpandedRow}
-      dsDeckFilter={dsDeckFilter} setDsDeckFilter={setDsDeckFilter}
-      dsTagFilter={dsTagFilter} setDsTagFilter={setDsTagFilter}
-      startDirectedStudy={startDirectedStudy} startShuffleStudy={startShuffleStudy}
-      onNavigate={onNavigate}
-      onHelpOpen={openHelp}
-    />;
-  }
-
   if (view === "directedStudy" && dsCards.length > 0) {
     return <DirectedStudySessionView
       dsCards={dsCards} dsIndex={dsIndex} dsConfig={dsConfig} dsTimer={dsTimer}
@@ -691,7 +697,7 @@ Respond ONLY with valid JSON, no markdown backticks, in this exact format:
       setFlipped={setFlipped} setGuessSubmitted={setGuessSubmitted}
       setShowRating={setShowRating} setAiResult={setAiResult}
       dsHandleRate={dsHandleRate} onSkip={dsSkip}
-      onExit={() => { clearInterval(dsTimerRef.current); setDsActive(false); setView("directed"); }}
+      onExit={() => { clearInterval(dsTimerRef.current); setDsActive(false); onNavigate("directed"); }}
     />;
   }
 

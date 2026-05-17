@@ -41,6 +41,7 @@ export default function LibrarySidebar({
   onRenameDocument, onRenameDeck,
   onTagDocument, onTagDeck,
   onUploadClick,
+  onAddYouTubeClick,
   groups, onCreateGroup, onRenameGroup, onDeleteGroup,
   onAddToGroup, onRemoveFromGroup,
   onOpenSettings, onOpenProfile, onOpenHome,
@@ -551,10 +552,16 @@ export default function LibrarySidebar({
         onMouseLeave={e => { if (!isSelected && !isRenaming && !isBeingDragged) e.currentTarget.style.background = "transparent"; }}
       >
         <span style={{ width: 10, flexShrink: 0 }} />
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-          <polyline points="14 2 14 8 20 8" />
-        </svg>
+        {doc.type === "youtube" ? (
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+            <polygon points="5 3 19 12 5 21 5 3" />
+          </svg>
+        ) : (
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+          </svg>
+        )}
         {isRenaming ? (
           <input
             ref={renameInputRef}
@@ -743,10 +750,16 @@ export default function LibrarySidebar({
                   onMouseLeave={e => { if (selectedDocId !== doc.id) e.currentTarget.style.background = "transparent"; }}
                 >
                   <span style={{ width: 10, flexShrink: 0 }} />
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                    <polyline points="14 2 14 8 20 8" />
-                  </svg>
+                  {doc.type === "youtube" ? (
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                      <polygon points="5 3 19 12 5 21 5 3" />
+                    </svg>
+                  ) : (
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                      <polyline points="14 2 14 8 20 8" />
+                    </svg>
+                  )}
                   <span style={{
                     flex: 1, minWidth: 0,
                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
@@ -883,11 +896,18 @@ export default function LibrarySidebar({
               collapsed={sections.ungrouped}
               onToggle={() => toggleSection("ungrouped")}
               actions={
-                <SectionAction T={T} title="Upload PDF" onClick={onUploadClick}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
-                  </svg>
-                </SectionAction>
+                <>
+                  <SectionAction T={T} title="Upload PDF" onClick={onUploadClick}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
+                    </svg>
+                  </SectionAction>
+                  <SectionAction T={T} title="Add YouTube video" onClick={onAddYouTubeClick}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polygon points="5 3 19 12 5 21 5 3" />
+                    </svg>
+                  </SectionAction>
+                </>
               }
             />
             <div style={{
@@ -1263,10 +1283,16 @@ function SearchResults({ T, docs, decks, selectedDocId, onSelectDocument, onSele
               onMouseEnter={e => { if (selectedDocId !== d.id) e.currentTarget.style.background = T.bgSub; }}
               onMouseLeave={e => { if (selectedDocId !== d.id) e.currentTarget.style.background = "transparent"; }}
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-              </svg>
+              {d.type === "youtube" ? (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                  <polygon points="5 3 19 12 5 21 5 3" />
+                </svg>
+              ) : (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+              )}
               <span style={{
                 flex: 1, minWidth: 0,
                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"

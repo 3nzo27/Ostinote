@@ -24,8 +24,8 @@ const MAX_PAGES = 300;     // conversion sanity ceiling
 
 // Extracts page-by-page text. Returns an array of { page, text } objects and
 // the total page count.
-export async function extractPdfText(file, onProgress) {
-  const buf = await file.arrayBuffer();
+export async function extractPdfText(source, onProgress) {
+  const buf = source instanceof ArrayBuffer ? source : await source.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
   const total = Math.min(pdf.numPages, MAX_PAGES);
   const pages = [];
@@ -89,7 +89,7 @@ If a passage looks like garbled OCR text (random characters, broken words), outp
 
 Begin now.`;
 
-export async function convertToMarkdown(pages, aiSettings, onProgress) {
+export async function convertToMarkdown(pages, aiSettings, onProgress, signal) {
   const raw = joinForConversion(pages);
   if (raw.length > MAX_CHARS) {
     throw new Error(
@@ -97,12 +97,11 @@ export async function convertToMarkdown(pages, aiSettings, onProgress) {
       `Chunked conversion isn't supported yet — try a smaller PDF or split it.`
     );
   }
-  onProgress?.({ stage: "convert", chars: raw.length });
+  onProgress?.({ stage: "convert", chars: raw.length, percent: 70 });
 
   const prompt = `${SYSTEM_INSTRUCTION}\n\n--- BEGIN PDF TEXT ---\n${raw}\n--- END PDF TEXT ---`;
-  const result = await callAi(aiSettings, prompt);
+  const result = await callAi(aiSettings, prompt, { maxTokens: 16384, signal });
 
-  // Strip any code-fence wrapper the model might add despite instructions
   return result
     .replace(/^```(?:markdown|md)?\s*\n/, "")
     .replace(/\n```\s*$/, "")
@@ -110,26 +109,28 @@ export async function convertToMarkdown(pages, aiSettings, onProgress) {
 }
 
 // High-level: take a File, return everything documentStore needs to save.
-export async function processFile(file, aiSettings, onProgress) {
-  onProgress?.({ stage: "start" });
+export async function processFile(source, fileMeta, aiSettings, onProgress, signal) {
+  onProgress?.({ stage: "start", percent: 0 });
 
-  const { pages, pageCount } = await extractPdfText(file, onProgress);
+  const { pages, pageCount } = await extractPdfText(source, (p) => {
+    const pct = 5 + Math.round((p.page / p.total) * 60);
+    onProgress?.({ ...p, percent: pct });
+  });
   if (pageCount === 0) {
     throw new Error("Could not extract any text from this PDF — it may be image-only (scanned).");
   }
 
-  const markdown = await convertToMarkdown(pages, aiSettings, onProgress);
+  const markdown = await convertToMarkdown(pages, aiSettings, onProgress, signal);
 
-  // Try to infer a title: first H1, else filename without extension
   const firstH1 = markdown.match(/^#\s+(.+)$/m);
-  const inferredTitle = firstH1 ? firstH1[1].trim() : file.name.replace(/\.[^.]+$/, "");
+  const inferredTitle = firstH1 ? firstH1[1].trim() : fileMeta.name.replace(/\.[^.]+$/, "");
 
-  onProgress?.({ stage: "done" });
+  onProgress?.({ stage: "done", percent: 100 });
 
   return {
     title: inferredTitle,
     markdown,
     pageCount,
-    fileSize: file.size,
+    fileSize: fileMeta.size,
   };
 }

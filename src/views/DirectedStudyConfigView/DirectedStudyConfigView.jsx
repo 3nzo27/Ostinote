@@ -6,7 +6,8 @@ export default function DirectedStudyConfigView({
   decks, dsConfig, setDsConfig, dsMode, setDsMode,
   allTags, dsExpandedRow, setDsExpandedRow,
   dsDeckFilter, setDsDeckFilter, dsTagFilter, setDsTagFilter,
-  startDirectedStudy, startShuffleStudy, onNavigate, onHelpOpen
+  startDirectedStudy, startShuffleStudy, onNavigate, onHelpOpen,
+  embedded = false,
 }) {
   const { T } = useTheme();
   const containerStyle = { maxWidth: 640, margin: "0 auto", padding: "calc(24px + var(--sat)) calc(16px + var(--sar)) calc(24px + var(--sab)) calc(16px + var(--sal))", minHeight: "100vh", fontFamily: T.fontBody, background: T.bg };
@@ -95,9 +96,9 @@ export default function DirectedStudyConfigView({
   const canStart = (dsMode === "shuffle" && allDue > 0) || (dsMode === "focus" && finalCount > 0);
 
   return (
-    <div style={containerStyle}>
-      <NavBar view="directed" onNavigate={onNavigate} onHelpOpen={onHelpOpen} />
-      <h2 style={{ fontSize: 22, fontWeight: 700, color: T.text, fontFamily: T.font, marginBottom: 6 }}>Study</h2>
+    <div style={embedded ? { maxWidth: 640 } : containerStyle}>
+      {!embedded && <NavBar view="directed" onNavigate={onNavigate} onHelpOpen={onHelpOpen} />}
+      {!embedded && <h2 style={{ fontSize: 22, fontWeight: 700, color: T.text, fontFamily: T.font, marginBottom: 6 }}>Study</h2>}
       <p style={{ fontSize: 13, color: T.textMid, fontFamily: T.fontBody, marginBottom: 24 }}>Pick your study style</p>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 16, animation: "fadeIn 0.4s ease" }}>

@@ -1,11 +1,27 @@
-// AI helpers that work against a document's converted Markdown.
-// Pattern: send the full Markdown as context (Gemini 2.5 can handle ~1M tokens).
+// AI helpers that work against a document's text content.
+// Pattern: send the full text as context (Gemini 2.5 can handle ~1M tokens).
 // All responses are grounded with [p.N] citations the UI parses into clickable
 // scroll-to-page links.
 
 import { callAi } from "./aiGrader.js";
 
-const CITATION_REMINDER = `Cite specific pages with the format [p.N] every time you reference content from the source. Never invent information that isn't in the document. If the document doesn't address something, say so.`;
+const PAGE_CITATION = `Cite specific pages with the format [p.N] every time you reference content from the source. Never invent information that isn't in the document. If the document doesn't address something, say so.`;
+
+const TIME_CITATION = `Cite specific timestamps with the format [t.M:SS] every time you reference content from the transcript. Never invent information that isn't in the transcript. If the transcript doesn't address something, say so.`;
+
+function citationReminder(d) {
+  return d?.type === "youtube" ? TIME_CITATION : PAGE_CITATION;
+}
+
+function markerNote(d) {
+  return d?.type === "youtube"
+    ? `(timestamp boundaries shown as "--- M:SS ---" markers)`
+    : `(page boundaries shown as "--- Page N ---" markers)`;
+}
+
+function citationFormat(d) {
+  return d?.type === "youtube" ? "[t.M:SS]" : "[p.N]";
+}
 
 const VOICE_REMINDER = `Address the reader directly as "you" — never "the student" or "the user". Be warm, concise, and helpful, like a tutor.`;
 
@@ -13,39 +29,46 @@ const VOICE_REMINDER = `Address the reader directly as "you" — never "the stud
 // than one doc is provided, the active one is marked [ACTIVE] so the model
 // understands which is the user's current focus while still seeing every
 // open tab's content as available context.
+function docText(d) {
+  return d.textContent || d.markdown || "";
+}
+
 function buildSystemPrompt(docs, activeDocId) {
   if (docs.length === 1) {
     const d = docs[0];
-    return `You are an expert tutor helping the user study a document called "${d.title}".
+    const content = docText(d);
+    const isYT = d.type === "youtube";
+    const sourceLabel = isYT ? "video transcript" : "document";
+    return `You are an expert tutor helping the user study a ${sourceLabel} called "${d.title}".
 
 ${VOICE_REMINDER}
 
-${CITATION_REMINDER}
+${citationReminder(d)}
 
 Format your responses in clean Markdown. Use **bold** for key terms, _italic_ for emphasis, and bullet/numbered lists where helpful.
 
-Here is the full document content (page boundaries shown as <!-- page N --> markers):
+Here is the full ${sourceLabel} content ${markerNote(d)}:
 
 ---
-${d.markdown}
+${content}
 ---
 
-Answer the user's questions about this document. When you make claims about the document, always add [p.N] citations using the page numbers you see in the markers above.`;
+Answer the user's questions about this ${sourceLabel}. When you make claims about it, always add ${citationFormat(d)} citations using the ${isYT ? "timestamps" : "page numbers"} you see in the markers above.`;
   }
-  // Multi-doc: combined context. Each doc is its own section so the model
-  // can cite which document a fact came from.
+  const activeDoc = docs.find(d => d.id === activeDocId) || docs[0];
   const sections = docs.map((d, i) => {
     const isActive = d.id === activeDocId;
-    const header = `# Document ${i + 1}: "${d.title}"${isActive ? " [ACTIVE]" : ""}`;
-    return `${header}\n\n${d.markdown}`;
+    const label = d.type === "youtube" ? "Video" : "Document";
+    const header = `# ${label} ${i + 1}: "${d.title}"${isActive ? " [ACTIVE]" : ""}`;
+    return `${header}\n\n${docText(d)}`;
   }).join("\n\n---\n\n");
-  return `You are an expert tutor helping the user study a group of documents. The user has ${docs.length} documents open as tabs; the one marked [ACTIVE] is the one they're currently reading, but you have full access to all of them.
+  return `You are an expert tutor helping the user study a group of documents and videos. The user has ${docs.length} items open as tabs; the one marked [ACTIVE] is the one they're currently focused on, but you have full access to all of them.
 
 ${VOICE_REMINDER}
 
-${CITATION_REMINDER} If the citation comes from a document other than the active one, prefix the page tag with the document title in brackets, like: [Document Title, p.4]. If it's from the active doc, [p.4] is fine.
+${citationReminder(activeDoc)} For documents, use [p.N]; for video transcripts, use [t.M:SS]. If the citation comes from a non-active item, prefix with the title in brackets, like: [Title, p.4] or [Title, t.1:23].
 
-When the user says "this document" or "this page," assume they mean the ACTIVE doc unless the surrounding question makes it obvious they mean another. If a question spans multiple docs, draw on all of them.
+When the user says "this document" or "this video," assume they mean the ACTIVE item unless context makes it obvious they mean another. If a question spans multiple items, draw on all of them.
 
 Format your responses in clean Markdown.
 
@@ -55,7 +78,7 @@ ${sections}
 
 ---
 
-Answer the user's questions, citing the relevant document(s) for any factual claims.`;
+Answer the user's questions, citing the relevant source(s) for any factual claims.`;
 }
 
 // Send a user message + chat history to the AI, get a response back.
@@ -132,7 +155,7 @@ export async function generateFlashcardsFromDocument({ aiSettings, doc, count = 
   const prompt = `You are creating high-quality flashcards from a document for spaced repetition study.
 
 Document: "${doc.title}"
-${doc.markdown}
+${docText(doc)}
 
 Generate ${count} flashcards covering the most important concepts. Rules:
 - Each flashcard should test active recall — NOT verbatim copy-paste.
@@ -152,15 +175,30 @@ Respond ONLY with valid JSON in this exact format:
   return Array.isArray(parsed.cards) ? parsed.cards : [];
 }
 
-// Extract `[p.N]` markers from an assistant message and return:
-// { stripped: "text without citations", citations: [{ page, label }] }
-// (We render citations as separate clickable chips in the UI, so the
-// in-line markers are still kept too — the consumer chooses.)
+// Extract `[p.N]` and `[t.M:SS]` markers from an assistant message.
+// Returns { citations: [{ page, label, type }] } where `page` is a page
+// number for docs or seconds for video timestamps.
 export function parseCitations(text) {
   if (!text) return { citations: [] };
-  const re = /\[p\.\s*(\d+)\]/gi;
-  const pages = new Set();
+  const citations = [];
+  const seen = new Set();
+
+  const pageRe = /\[p\.\s*(\d+)\]/gi;
   let m;
-  while ((m = re.exec(text)) !== null) pages.add(parseInt(m[1], 10));
-  return { citations: [...pages].sort((a, b) => a - b).map(p => ({ page: p, label: `p.${p}` })) };
+  while ((m = pageRe.exec(text)) !== null) {
+    const p = parseInt(m[1], 10);
+    const key = `p:${p}`;
+    if (!seen.has(key)) { seen.add(key); citations.push({ page: p, label: `p.${p}`, type: "page" }); }
+  }
+
+  const timeRe = /\[t\.\s*(\d+):(\d{2})(?::(\d{2}))?\]/gi;
+  while ((m = timeRe.exec(text)) !== null) {
+    const secs = m[3]
+      ? parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseInt(m[3])
+      : parseInt(m[1]) * 60 + parseInt(m[2]);
+    const key = `t:${secs}`;
+    if (!seen.has(key)) { seen.add(key); citations.push({ page: secs, label: m[0].slice(1, -1), type: "time" }); }
+  }
+
+  return { citations: citations.sort((a, b) => a.page - b.page) };
 }

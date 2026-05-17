@@ -1,9 +1,9 @@
 import useTheme from "../../theme/useTheme.js";
-import NavBar from "../../components/NavBar/NavBar.jsx";
+import TopBar from "../../components/TopBar/TopBar.jsx";
 
 export default function DirectedStudyResultsView({ dsResults, onNavigate, onHelpOpen }) {
   const { T } = useTheme();
-  const containerStyle = { maxWidth: 640, margin: "0 auto", padding: "calc(24px + var(--sat)) calc(16px + var(--sar)) calc(24px + var(--sab)) calc(16px + var(--sal))", minHeight: "100vh", fontFamily: T.fontBody, background: T.bg };
+  const containerStyle = { maxWidth: 640, margin: "0 auto", padding: "calc(24px + var(--sat)) calc(16px + var(--sar)) calc(24px + var(--sab)) calc(16px + var(--sal))", fontFamily: T.fontBody, width: "100%", boxSizing: "border-box" };
 
   const totalTime = dsResults.reduce((s, r) => s + r.timeSpent, 0);
   const avgTime = dsResults.length > 0 ? Math.round(totalTime / dsResults.length) : 0;
@@ -18,8 +18,9 @@ export default function DirectedStudyResultsView({ dsResults, onNavigate, onHelp
   const ratingColorMap = { 0: T.forgot, 2: T.hard, 3: T.good, 4: T.easy, 5: T.perfect };
 
   return (
-    <div style={containerStyle}>
-      <NavBar view="directed" onNavigate={onNavigate} onHelpOpen={onHelpOpen} />
+    <div style={{ minHeight: "100vh", background: T.bg, display: "flex", flexDirection: "column" }}>
+      <TopBar view="decks" onNavigate={onNavigate} />
+      <div style={containerStyle}>
 
       <div style={{ textAlign: "center", marginBottom: 28, animation: "fadeIn 0.4s ease" }}>
         <h2 style={{ fontSize: 22, fontWeight: 700, color: T.text, fontFamily: T.font, marginBottom: 4 }}>
@@ -94,6 +95,7 @@ export default function DirectedStudyResultsView({ dsResults, onNavigate, onHelp
             fontFamily: T.fontBody, boxShadow: "0 2px 8px rgba(44,42,37,0.2)"
           }}>Done</button>
         </div>
+      </div>
       </div>
     </div>
   );

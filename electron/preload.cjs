@@ -17,3 +17,8 @@ contextBridge.exposeInMainWorld("ostinoteAI", {
   // omitted to use the CLI default.
   complete: ({ prompt, model }) => ipcRenderer.invoke("ai:complete", { prompt, model }),
 });
+
+contextBridge.exposeInMainWorld("ostinoteYT", {
+  getTranscript: ({ videoId }) => ipcRenderer.invoke("yt:transcript", { videoId }),
+  getVideoInfo: ({ videoId }) => ipcRenderer.invoke("yt:video-info", { videoId }),
+});

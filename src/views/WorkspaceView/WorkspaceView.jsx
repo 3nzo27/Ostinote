@@ -11,16 +11,19 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import useTheme from "../../theme/useTheme.js";
 import Markdown from "../../components/Markdown/Markdown.jsx";
+import PdfViewer from "../../components/PdfViewer/PdfViewer.jsx";
+import VideoViewer from "../../components/VideoViewer/VideoViewer.jsx";
 import LibrarySidebar from "../../components/LibrarySidebar/LibrarySidebar.jsx";
 import DocumentSidebar from "../../components/DocumentSidebar/DocumentSidebar.jsx";
 import TopBar from "../../components/TopBar/TopBar.jsx";
 import {
   listDocuments, listFolders, getDocument, saveDocument, deleteDocument, findByHash,
-  hashFile, generateId,
+  hashBuffer, generateId, savePdfBlob, getPdfBlob,
   saveFolder, deleteFolder, moveDocument, moveFolder, updateDocument,
   listHighlights, saveHighlight,
 } from "../../utils/documentStore.js";
-import { processFile } from "../../utils/pdfConverter.js";
+import { extractPdfText } from "../../utils/pdfConverter.js";
+import { parseYouTubeUrl, fetchTranscript, fetchVideoInfo, formatTranscriptAsText } from "../../utils/youtubeTranscript.js";
 
 // Workspace tabs are documents only — decks live in the Tool Bar (right
 // sidebar) under their own "Cards" tab. The middle pane stays focused on
@@ -162,10 +165,13 @@ export default function WorkspaceView({
 
   // ---- Active content state ----
   const [loadedDocs, setLoadedDocs] = useState({});
+  const [pdfBuffers, setPdfBuffers] = useState({});
   const [highlights, setHighlights] = useState([]);
   const [progress, setProgress] = useState(0);
   const [selectionPopover, setSelectionPopover] = useState(null);
+  const [ytUrlModal, setYtUrlModal] = useState(false);
   const readerRef = useRef(null);
+  const videoRef = useRef(null);
 
   const activeDoc = activeDocId ? loadedDocs[activeDocId] : null;
   const selectedDeck = selectedDeckId ? (decks || []).find(d => d.id === selectedDeckId) : null;
@@ -197,6 +203,19 @@ export default function WorkspaceView({
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openDocIds]);
+
+  // Load PDF blob for active doc only — release inactive buffers to save memory.
+  useEffect(() => {
+    if (!activeDocId) return;
+    const doc = loadedDocs[activeDocId];
+    if (!doc?.hasPdf) return;
+    let cancelled = false;
+    getPdfBlob(activeDocId).then(buf => {
+      if (cancelled || !buf) return;
+      setPdfBuffers({ [activeDocId]: buf });
+    });
+    return () => { cancelled = true; };
+  }, [activeDocId, loadedDocs]);
 
   // Highlights follow the active doc.
   useEffect(() => {
@@ -251,8 +270,10 @@ export default function WorkspaceView({
     return () => el.removeEventListener("scroll", onScroll);
   }, [activeDoc]);
 
-  // Text selection → floating "Highlight" button
+  // Text selection → floating "Highlight" button (Markdown view only).
+  // PDF view handles selection via PdfViewer's onHighlight callback.
   const handleMouseUp = useCallback(() => {
+    if (activeDoc?.hasPdf) return;
     const sel = window.getSelection();
     const text = sel?.toString().trim();
     if (!text || text.length < 4) { setSelectionPopover(null); return; }
@@ -265,7 +286,7 @@ export default function WorkspaceView({
       text,
       page: findPageForNode(sel.anchorNode),
     });
-  }, []);
+  }, [activeDoc?.hasPdf]);
   useEffect(() => {
     document.addEventListener("mouseup", handleMouseUp);
     return () => document.removeEventListener("mouseup", handleMouseUp);
@@ -290,6 +311,10 @@ export default function WorkspaceView({
   };
 
   const scrollToPage = useCallback((n) => {
+    if (activeDoc?.type === "youtube") {
+      videoRef.current?.seekTo(n);
+      return;
+    }
     const target = document.getElementById(`page-${n}`);
     if (!target) return;
     target.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -297,7 +322,7 @@ export default function WorkspaceView({
     target.style.transition = "background 0.5s ease";
     target.style.background = `${T.easy}15`;
     setTimeout(() => { if (target) target.style.background = orig || "transparent"; }, 1200);
-  }, [T.easy]);
+  }, [T.easy, activeDoc?.type]);
 
   // Markdown w/ highlights baked in
   const markdownWithHighlights = useMemo(() => {
@@ -373,18 +398,11 @@ export default function WorkspaceView({
   };
 
   // ---- Upload flow ----
+  // Native PDF: store blob + extract text for chat. No AI conversion.
 
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({ stage: "", page: 0, total: 0 });
   const [uploadError, setUploadError] = useState(null);
-
-  // "Do we have an AI provider configured?" — true for any cloud key
-  // OR the keyless claude-local provider. `useLocal` (the WebLLM grading
-  // toggle) still suppresses cloud paths to preserve existing behavior.
-  const hasApiKey =
-    aiSettings?.provider === "claude-local"
-      ? true
-      : (!!aiSettings?.apiKey && !aiSettings?.useLocal);
 
   const handleUploadFiles = async (files) => {
     setUploadError(null);
@@ -394,39 +412,107 @@ export default function WorkspaceView({
       setUploadError("Only PDF files are supported.");
       return;
     }
-    if (!hasApiKey) {
-      setUploadError("PDF conversion needs a cloud AI provider configured.");
-      return;
-    }
+
     setUploading(true);
+    setUploadProgress({ stage: "start", percent: 0 });
+
     try {
-      const hash = await hashFile(file);
+      const buffer = await file.arrayBuffer();
+      setUploadProgress({ stage: "hash", percent: 10 });
+
+      const hash = await hashBuffer(buffer);
       const existing = await findByHash(hash);
       if (existing) {
-        setUploading(false);
         openDocTab(existing.id);
         return;
       }
-      const result = await processFile(file, aiSettings, p => setUploadProgress(p));
+
+      setUploadProgress({ stage: "extract", percent: 20, page: 0, total: 0 });
+      const { pages, pageCount } = await extractPdfText(buffer.slice(0), (p) => {
+        const pct = 20 + Math.round((p.page / p.total) * 60);
+        setUploadProgress({ ...p, percent: pct });
+      });
+
+      const textContent = pages.map(p => `--- Page ${p.page} ---\n${p.text}`).join("\n\n");
+      const firstLine = pages[0]?.text?.split("\n").find(l => l.trim()) || "";
+      const title = firstLine.slice(0, 120).trim() || file.name.replace(/\.[^.]+$/, "");
+
+      setUploadProgress({ stage: "save", percent: 90 });
+
+      const docId = generateId();
       const doc = {
-        id: generateId(),
-        title: result.title,
-        markdown: result.markdown,
-        pageCount: result.pageCount,
-        fileSize: result.fileSize,
-        hash, uploadedAt: Date.now(),
+        id: docId,
+        title,
+        textContent,
+        markdown: null,
+        hasPdf: true,
+        pageCount,
+        fileSize: file.size,
+        hash,
+        uploadedAt: Date.now(),
+        folderId: null,
+      };
+
+      await Promise.all([
+        saveDocument(doc),
+        savePdfBlob(docId, buffer),
+      ]);
+
+      setPdfBuffers({ [docId]: buffer });
+      setDocuments(prev => [doc, ...prev]);
+      openDocTab(docId);
+      setUploadProgress({ stage: "done", percent: 100 });
+    } catch (err) {
+      console.error("Upload failed:", err);
+      setUploadError(err.message || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // ---- Add YouTube video ----
+  const handleAddYouTube = async (url) => {
+    const parsed = parseYouTubeUrl(url);
+    if (!parsed) { setUploadError("Not a valid YouTube URL"); return; }
+    const { videoId } = parsed;
+    const existing = await findByHash(videoId);
+    if (existing) { openDocTab(existing.id); setYtUrlModal(false); return; }
+    setUploading(true);
+    setUploadError(null);
+    try {
+      setUploadProgress({ stage: "transcript", percent: 20 });
+      const [info, segments] = await Promise.all([
+        fetchVideoInfo(videoId).catch(() => ({ title: null })),
+        fetchTranscript(videoId),
+      ]);
+      setUploadProgress({ stage: "saving", percent: 80 });
+      const textContent = formatTranscriptAsText(segments);
+      const docId = generateId();
+      const doc = {
+        id: docId,
+        title: info.title || `YouTube: ${videoId}`,
+        textContent,
+        type: "youtube",
+        videoId,
+        transcript: segments,
+        hasPdf: false,
+        markdown: null,
+        pageCount: null,
+        fileSize: null,
+        hash: videoId,
+        uploadedAt: Date.now(),
         folderId: null,
       };
       await saveDocument(doc);
       setDocuments(prev => [doc, ...prev]);
-      openDocTab(doc.id);
-      setUploading(false);
+      setLoadedDocs(prev => ({ ...prev, [docId]: doc }));
+      openDocTab(docId);
+      setUploadProgress({ stage: "done", percent: 100 });
+      setYtUrlModal(false);
     } catch (err) {
-      // Surface the full error in the console so users (and us) can see
-      // the stack trace, not just the message. The UI still shows the
-      // short message.
-      console.error("Upload failed:", err);
-      setUploadError(err.message || "Conversion failed");
+      console.error("YouTube add failed:", err);
+      setUploadError(err.message || "Failed to add YouTube video");
+    } finally {
       setUploading(false);
     }
   };
@@ -482,6 +568,7 @@ export default function WorkspaceView({
           onDeleteDeck={onDeleteDeck}
           onDeleteDocument={handleDeleteDocument}
           onUploadClick={() => fileInputRef.current?.click()}
+          onAddYouTubeClick={() => setYtUrlModal(true)}
           groups={groups}
           onCreateGroup={handleCreateGroup}
           onRenameGroup={handleRenameGroup}
@@ -521,20 +608,43 @@ export default function WorkspaceView({
                 onClose={closeDocTab}
               />
 
-              {/* Reader pane — renders the active doc's markdown. */}
+              {/* Reader pane — YouTube / PDF / Markdown. */}
               {activeDoc ? (
-                <div ref={readerRef} style={{
-                  flex: 1, overflowY: "auto", padding: "32px 24px 80px",
-                  minHeight: 0,
-                }}>
-                  <article style={{ maxWidth: 720, margin: "0 auto", width: "100%" }}>
-                    <h1 style={{
-                      fontSize: 32, fontWeight: 700, color: T.text, fontFamily: T.font,
-                      marginBottom: 24, letterSpacing: -0.4, lineHeight: 1.2
-                    }}>{activeDoc.title}</h1>
-                    <Markdown markdown={markdownWithHighlights} />
-                  </article>
-                </div>
+                activeDoc.type === "youtube" ? (
+                  <VideoViewer
+                    ref={videoRef}
+                    doc={activeDoc}
+                    onHighlight={(sel) => setSelectionPopover(sel)}
+                    onScrollProgress={setProgress}
+                  />
+                ) : activeDoc.hasPdf ? (
+                  pdfBuffers[activeDoc.id] ? (
+                    <PdfViewer
+                      buffer={pdfBuffers[activeDoc.id]}
+                      highlights={highlights}
+                      onHighlight={(sel) => setSelectionPopover(sel)}
+                      onScrollProgress={setProgress}
+                    />
+                  ) : (
+                    <div style={{
+                      flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+                      color: T.textLight, fontSize: 13, fontFamily: T.fontBody,
+                    }}>Loading PDF…</div>
+                  )
+                ) : (
+                  <div ref={readerRef} style={{
+                    flex: 1, overflowY: "auto", padding: "32px 24px 80px",
+                    minHeight: 0,
+                  }}>
+                    <article style={{ maxWidth: 720, margin: "0 auto", width: "100%" }}>
+                      <h1 style={{
+                        fontSize: 32, fontWeight: 700, color: T.text, fontFamily: T.font,
+                        marginBottom: 24, letterSpacing: -0.4, lineHeight: 1.2
+                      }}>{activeDoc.title}</h1>
+                      <Markdown markdown={markdownWithHighlights} />
+                    </article>
+                  </div>
+                )
               ) : (
                 <div style={{
                   flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
@@ -548,13 +658,11 @@ export default function WorkspaceView({
             <EmptyMiddle
               T={T}
               docs={documents}
-              hasApiKey={hasApiKey}
               uploading={uploading}
               uploadProgress={uploadProgress}
               uploadError={uploadError}
               onUploadClick={() => fileInputRef.current?.click()}
               onSelectDoc={openDocTab}
-              onOpenSettings={() => onNavigate("settings")}
             />
           )}
         </div>
@@ -614,6 +722,17 @@ export default function WorkspaceView({
         style={{ display: "none" }}
         onChange={e => { handleUploadFiles(e.target.files); e.target.value = ""; }}
       />
+
+      {/* YouTube URL modal */}
+      {ytUrlModal && (
+        <YouTubeUrlModal
+          T={T}
+          uploading={uploading}
+          error={uploadError}
+          onSubmit={handleAddYouTube}
+          onClose={() => { setYtUrlModal(false); setUploadError(null); }}
+        />
+      )}
       </div>{/* /3-column row */}
     </div>
   );
@@ -675,10 +794,16 @@ function DocTabStrip({ T, openDocIds, activeDocId, loadedDocs, documents, progre
                 }
               }}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-              </svg>
+              {loadedDocs[id]?.type === "youtube" ? (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                  <polygon points="5 3 19 12 5 21 5 3" />
+                </svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+              )}
               <span style={{
                 flex: 1, minWidth: 0,
                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
@@ -716,7 +841,7 @@ function DocTabStrip({ T, openDocIds, activeDocId, loadedDocs, documents, progre
   );
 }
 
-function EmptyMiddle({ T, docs, hasApiKey, uploading, uploadProgress, uploadError, onUploadClick, onSelectDoc, onOpenSettings }) {
+function EmptyMiddle({ T, docs, uploading, uploadProgress, uploadError, onUploadClick, onSelectDoc }) {
   const [dragOver, setDragOver] = useState(false);
   const counter = useRef(0);
   const enter = (e) => { e.preventDefault(); if (e.dataTransfer?.types?.includes("Files")) { counter.current++; setDragOver(true); } };
@@ -771,57 +896,23 @@ function EmptyMiddle({ T, docs, hasApiKey, uploading, uploadProgress, uploadErro
               : "Pick a document from the library on the left, or upload a new one."}
         </p>
 
-        {!hasApiKey && (
-          <div style={{
-            display: "inline-flex", alignItems: "center", gap: 8,
-            padding: "10px 16px", borderRadius: 999,
-            background: `${T.hard || "#c47f2a"}15`, border: `1px solid ${T.hard || "#c47f2a"}40`,
-            fontSize: 12, color: T.text, fontFamily: T.fontBody, marginBottom: 16
-          }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.hard || "#c47f2a"} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
-            </svg>
-            Cloud AI required for PDF reading
-            <button onClick={onOpenSettings} style={{
-              background: "none", border: "none", padding: 0, color: T.easy,
-              cursor: "pointer", fontFamily: "inherit", fontSize: "inherit", textDecoration: "underline"
-            }}>Setup →</button>
-          </div>
-        )}
-
-        {hasApiKey && (
-          <button onClick={onUploadClick} disabled={uploading} style={{
-            padding: "11px 22px", borderRadius: 999,
-            background: T.text, color: T.card, border: "none",
-            fontWeight: 600, fontSize: 13, fontFamily: T.fontBody,
-            cursor: uploading ? "default" : "pointer",
-            display: "inline-flex", alignItems: "center", gap: 8,
-            boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
-            opacity: uploading ? 0.6 : 1
-          }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
-            </svg>
-            Upload PDF
-          </button>
-        )}
+        <button onClick={onUploadClick} disabled={uploading} style={{
+          padding: "11px 22px", borderRadius: 999,
+          background: T.text, color: T.card, border: "none",
+          fontWeight: 600, fontSize: 13, fontFamily: T.fontBody,
+          cursor: uploading ? "default" : "pointer",
+          display: "inline-flex", alignItems: "center", gap: 8,
+          boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
+          opacity: uploading ? 0.6 : 1
+        }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
+          </svg>
+          Upload PDF
+        </button>
 
         {uploading && (
-          <div style={{
-            marginTop: 24, padding: "14px 16px", borderRadius: 12,
-            background: T.bgSub, border: `1px solid ${T.border}`,
-            fontFamily: T.fontBody, textAlign: "left", maxWidth: 360, margin: "24px auto 0"
-          }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-              <div style={{ width: 8, height: 8, borderRadius: "50%", background: T.good, animation: "pulse 1.2s ease-in-out infinite" }} />
-              <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
-                {uploadProgress.stage === "extract" && `Extracting page ${uploadProgress.page} of ${uploadProgress.total}…`}
-                {uploadProgress.stage === "convert" && "Converting with AI…"}
-                {(uploadProgress.stage === "start" || !uploadProgress.stage) && "Reading PDF…"}
-              </div>
-            </div>
-            <div style={{ fontSize: 11, color: T.textMid }}>10-30 seconds. Cached after first conversion.</div>
-          </div>
+          <UploadProgressBar T={T} uploadProgress={uploadProgress} />
         )}
 
         {uploadError && (
@@ -879,6 +970,41 @@ const topBtn = (T) => ({
   transition: "color 0.1s"
 });
 
+function UploadProgressBar({ T, uploadProgress }) {
+  const pct = uploadProgress.percent || 0;
+  const label =
+    uploadProgress.stage === "extract"
+      ? `Extracting page ${uploadProgress.page || 0} of ${uploadProgress.total || 0}…`
+      : uploadProgress.stage === "hash" ? "Checking for duplicates…"
+      : uploadProgress.stage === "save" ? "Saving…"
+      : uploadProgress.stage === "done" ? "Done"
+      : "Reading PDF…";
+
+  return (
+    <div style={{
+      marginTop: 24, padding: "16px 20px", borderRadius: 12,
+      background: T.bgSub, border: `1px solid ${T.border}`,
+      fontFamily: T.fontBody, maxWidth: 360, margin: "24px auto 0",
+    }}>
+      <div style={{
+        height: 6, borderRadius: 3, background: T.border,
+        overflow: "hidden", marginBottom: 12,
+      }}>
+        <div style={{
+          height: "100%", borderRadius: 3,
+          background: T.good,
+          width: `${Math.round(pct)}%`,
+          transition: "width 0.3s ease",
+        }} />
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{label}</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: T.textMid }}>{Math.round(pct)}%</div>
+      </div>
+    </div>
+  );
+}
+
 // Walks up DOM from a node to find its nearest <section id="page-N">
 function findPageForNode(node) {
   let el = node?.nodeType === 3 ? node.parentElement : node;
@@ -887,4 +1013,81 @@ function findPageForNode(node) {
     el = el.parentElement;
   }
   return null;
+}
+
+function YouTubeUrlModal({ T, uploading, error, onSubmit, onClose }) {
+  const [url, setUrl] = useState("");
+  const inputRef = useRef(null);
+  useEffect(() => { inputRef.current?.focus(); }, []);
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!url.trim() || uploading) return;
+    onSubmit(url.trim());
+  };
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 9999,
+        background: "rgba(0,0,0,0.35)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}
+    >
+      <form
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={handleSubmit}
+        style={{
+          background: T.card, borderRadius: T.radiusLg || 14,
+          padding: 24, width: 420, maxWidth: "90vw",
+          boxShadow: T.shadow3, border: `1px solid ${T.border}`,
+        }}
+      >
+        <div style={{
+          fontSize: 15, fontWeight: 700, color: T.text,
+          fontFamily: T.font, marginBottom: 14,
+        }}>Add YouTube Video</div>
+        <input
+          ref={inputRef}
+          type="text"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="Paste a YouTube URL…"
+          style={{
+            width: "100%", padding: "10px 12px", fontSize: 13,
+            borderRadius: 8, border: `1.5px solid ${T.border}`,
+            background: T.bg, color: T.text, fontFamily: T.fontBody,
+            outline: "none", boxSizing: "border-box",
+          }}
+          onFocus={(e) => { e.target.style.borderColor = T.borderStrong; }}
+          onBlur={(e) => { e.target.style.borderColor = T.border; }}
+        />
+        {error && (
+          <div style={{
+            fontSize: 12, color: T.due || "#c44", marginTop: 8,
+            fontFamily: T.fontBody,
+          }}>{error}</div>
+        )}
+        <div style={{ display: "flex", gap: 8, marginTop: 16, justifyContent: "flex-end" }}>
+          <button
+            type="button" onClick={onClose}
+            style={{
+              padding: "8px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600,
+              border: `1.5px solid ${T.border}`, background: T.card, color: T.textMid,
+              cursor: "pointer", fontFamily: T.fontBody,
+            }}
+          >Cancel</button>
+          <button
+            type="submit"
+            disabled={uploading || !url.trim()}
+            style={{
+              padding: "8px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600,
+              border: "none", background: T.hard || "#c47f2a", color: "#fff",
+              cursor: uploading ? "wait" : "pointer", fontFamily: T.fontBody,
+              opacity: uploading || !url.trim() ? 0.6 : 1,
+            }}
+          >{uploading ? "Adding…" : "Add Video"}</button>
+        </div>
+      </form>
+    </div>
+  );
 }

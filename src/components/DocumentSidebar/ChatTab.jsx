@@ -384,7 +384,7 @@ function Message({ message, T, onScrollToPage, onMakeFlashcard, cardLoading }) {
             <button
               key={c.page}
               onClick={() => onScrollToPage(c.page)}
-              title={`Jump to page ${c.page}`}
+              title={c.type === "time" ? `Jump to ${c.label}` : `Jump to page ${c.page}`}
               style={{
                 padding: "2px 8px", borderRadius: 999,
                 border: `1px solid ${T.border}`, background: T.card,
@@ -412,27 +412,44 @@ function Message({ message, T, onScrollToPage, onMakeFlashcard, cardLoading }) {
 
 function renderTextWithCitations(children, T, onScrollToPage) {
   if (typeof children !== "string") return children;
-  const parts = children.split(/(\[p\.\s*\d+\])/gi);
+  const parts = children.split(/(\[(?:p\.\s*\d+|t\.\s*\d+:\d{2}(?::\d{2})?)\])/gi);
   return parts.map((part, i) => {
-    const m = part.match(/^\[p\.\s*(\d+)\]$/i);
-    if (m) {
-      const page = parseInt(m[1], 10);
+    const pm = part.match(/^\[p\.\s*(\d+)\]$/i);
+    if (pm) {
+      const page = parseInt(pm[1], 10);
       return (
         <button key={i}
           onClick={() => onScrollToPage(page)}
           title={`Jump to page ${page}`}
-          style={{
-            display: "inline", padding: "0 4px",
-            border: "none", background: "transparent",
-            color: T.easy, fontFamily: T.fontBody, fontSize: "0.9em",
-            fontWeight: 600, cursor: "pointer", verticalAlign: "baseline",
-            textDecoration: "underline", textUnderlineOffset: 2
-          }}
+          style={citationStyle(T)}
         >[p.{page}]</button>
+      );
+    }
+    const tm = part.match(/^\[t\.\s*(\d+):(\d{2})(?::(\d{2}))?\]$/i);
+    if (tm) {
+      const secs = tm[3]
+        ? parseInt(tm[1]) * 3600 + parseInt(tm[2]) * 60 + parseInt(tm[3])
+        : parseInt(tm[1]) * 60 + parseInt(tm[2]);
+      return (
+        <button key={i}
+          onClick={() => onScrollToPage(secs)}
+          title={`Jump to ${part.slice(1, -1)}`}
+          style={citationStyle(T)}
+        >{part}</button>
       );
     }
     return part;
   });
+}
+
+function citationStyle(T) {
+  return {
+    display: "inline", padding: "0 4px",
+    border: "none", background: "transparent",
+    color: T.easy, fontFamily: T.fontBody, fontSize: "0.9em",
+    fontWeight: 600, cursor: "pointer", verticalAlign: "baseline",
+    textDecoration: "underline", textUnderlineOffset: 2,
+  };
 }
 
 function ActionChip({ children, onClick, disabled, T }) {

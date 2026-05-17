@@ -1,7 +1,8 @@
-// IndexedDB-backed storage for converted PDF documents, their highlights,
+// IndexedDB-backed storage for PDF documents, their highlights,
 // chat sessions, and the folder tree that organizes them.
 //
-// documents:  { id, title, markdown, uploadedAt, pageCount, fileSize, hash, folderId?, sortOrder? }
+// documents:  { id, title, textContent, uploadedAt, pageCount, fileSize, hash, hasPdf?, markdown?, folderId?, sortOrder? }
+// pdfBlobs:   { docId, buffer (ArrayBuffer) }  — raw PDF kept separate so listing docs stays fast
 // highlights: { id, docId, text, page, color, note, createdAt, source }
 // chats:      { id, docId, messages: [{role, content, ts}], createdAt, updatedAt }
 // folders:    { id, name, parentId, createdAt, sortOrder }
@@ -9,10 +10,11 @@
 import { openDB } from "idb";
 
 const DB_NAME = "ostinote-documents";
-const VERSION = 3;
+const VERSION = 4;
 
 const STORES = {
   DOCUMENTS: "documents",
+  PDF_BLOBS: "pdfBlobs",
   HIGHLIGHTS: "highlights",
   CHATS: "chats",
   FOLDERS: "folders",
@@ -51,6 +53,9 @@ function getDb() {
             docs.createIndex("folderId", "folderId");
           }
         }
+        if (oldVersion < 4) {
+          db.createObjectStore(STORES.PDF_BLOBS, { keyPath: "docId" });
+        }
       },
     });
   }
@@ -78,8 +83,12 @@ export async function listDocuments() {
 
 export async function deleteDocument(id) {
   const db = await getDb();
-  const tx = db.transaction([STORES.DOCUMENTS, STORES.HIGHLIGHTS, STORES.CHATS], "readwrite");
+  const tx = db.transaction(
+    [STORES.DOCUMENTS, STORES.PDF_BLOBS, STORES.HIGHLIGHTS, STORES.CHATS],
+    "readwrite"
+  );
   await tx.objectStore(STORES.DOCUMENTS).delete(id);
+  await tx.objectStore(STORES.PDF_BLOBS).delete(id).catch(() => {});
   const hIdx = tx.objectStore(STORES.HIGHLIGHTS).index("docId");
   for await (const cursor of hIdx.iterate(id)) await cursor.delete();
   const cIdx = tx.objectStore(STORES.CHATS).index("docId");
@@ -91,6 +100,19 @@ export async function findByHash(hash) {
   const db = await getDb();
   const idx = db.transaction(STORES.DOCUMENTS).store.index("hash");
   return (await idx.get(hash)) || null;
+}
+
+// ---------- PDF blobs ----------
+
+export async function savePdfBlob(docId, buffer) {
+  const db = await getDb();
+  await db.put(STORES.PDF_BLOBS, { docId, buffer });
+}
+
+export async function getPdfBlob(docId) {
+  const db = await getDb();
+  const row = await db.get(STORES.PDF_BLOBS, docId);
+  return row?.buffer || null;
 }
 
 // ---------- highlights ----------
@@ -208,12 +230,15 @@ export async function moveFolder(folderId, newParentId) {
 
 // ---------- helpers ----------
 
-export async function hashFile(file) {
-  const buf = await file.arrayBuffer();
-  const digest = await crypto.subtle.digest("SHA-256", buf);
+export async function hashBuffer(buffer) {
+  const digest = await crypto.subtle.digest("SHA-256", buffer);
   return Array.from(new Uint8Array(digest))
     .map(b => b.toString(16).padStart(2, "0"))
     .join("");
+}
+
+export async function hashFile(file) {
+  return hashBuffer(await file.arrayBuffer());
 }
 
 export function generateId() {
