@@ -600,13 +600,14 @@ export default function WorkspaceView({
           background: T.bg
         }}>
           {openDocIds.length > 0 ? (
-            // Manila-folder layout: tabs sit on top of the folder body
-            // like the label tabs on a physical file folder. The active
-            // tab's color matches the body so they read as one piece.
+            // Floating-bubble layout: tabs are pill-shaped chips that
+            // hover above a separate rounded content panel, with clear
+            // air-gap between the two so they read as distinct elements.
             <div style={{
               flex: 1, minHeight: 0, minWidth: 0,
               display: "flex", flexDirection: "column",
               padding: "10px 14px 14px",
+              gap: 10,
             }}>
               <DocTabStrip
                 T={T}
@@ -618,18 +619,17 @@ export default function WorkspaceView({
                 onClose={closeDocTab}
               />
 
-              {/* Folder body — wraps the reader content. Flat top (tabs
-                  attach here), rounded bottom corners. Thin border + soft
-                  shadow gives the paper-folder feel without being loud. */}
+              {/* Workspace panel — a regular rounded card holding the
+                  reader. The tabs are decoupled bubbles above it. */}
               <div style={{
                 flex: 1, minHeight: 0, minWidth: 0,
                 display: "flex", flexDirection: "column",
                 background: T.card,
-                border: `1.5px solid ${T.borderStrong}`,
-                borderRadius: "0 12px 12px 12px",
+                border: `1px solid ${T.border}`,
+                borderRadius: 14,
                 overflow: "hidden",
-                position: "relative", zIndex: 1,
-                boxShadow: T.shadow1 || "0 2px 8px rgba(0,0,0,0.05)",
+                position: "relative",
+                boxShadow: T.shadow2 || "0 4px 14px rgba(0,0,0,0.08)",
               }}>
                 {/* Scroll progress as a thin bottom-edge stripe — moved off
                     the tab/body seam so the active tab merges seamlessly. */}
@@ -777,20 +777,20 @@ export default function WorkspaceView({
 
 // ---- Subcomponents ----
 
-// Manila-folder-style tab strip — each tab is a rounded-top label that
-// sits on top of the folder body below. The active tab's color and
-// border match the body so they read as one continuous piece of paper;
-// inactive tabs sit slightly recessed (T.bgSub) like rear folder labels.
+// Floating-bubble tab strip — each open doc is rendered as a pill chip
+// that hovers above the workspace panel below. Active bubble is lifted
+// slightly (stronger shadow + opaque card bg); inactive bubbles are
+// lighter / more recessed.
 function DocTabStrip({ T, openDocIds, activeDocId, loadedDocs, documents, onSelect, onClose }) {
   const titleFor = (id) =>
     loadedDocs[id]?.title || documents.find(d => d.id === id)?.title || "Untitled";
   return (
     <div style={{
-      position: "relative", zIndex: 2,
       flexShrink: 0,
-      display: "flex", alignItems: "flex-end",
-      paddingLeft: 0, paddingRight: 6,
-      gap: 2,
+      display: "flex", alignItems: "center",
+      paddingLeft: 2, paddingRight: 6,
+      paddingTop: 2, paddingBottom: 2,  // breathing room so shadows don't clip
+      gap: 8,
       overflowX: "auto", overflowY: "visible",
     }}>
       {openDocIds.map(id => {
@@ -806,42 +806,46 @@ function DocTabStrip({ T, openDocIds, activeDocId, loadedDocs, documents, onSele
             title={title}
             style={{
               display: "flex", alignItems: "center", gap: 8,
-              padding: isActive ? "9px 14px 11px" : "7px 12px 8px",
-              borderTopLeftRadius: 10, borderTopRightRadius: 10,
-              borderBottomLeftRadius: 0, borderBottomRightRadius: 0,
-              borderTop: `1.5px solid ${T.borderStrong}`,
-              borderLeft: `1.5px solid ${T.borderStrong}`,
-              borderRight: `1.5px solid ${T.borderStrong}`,
-              borderBottom: isActive ? "none" : `1.5px solid ${T.borderStrong}`,
+              padding: "6px 12px 6px 12px",
+              borderRadius: 999,
+              border: `1px solid ${isActive ? T.borderStrong : T.border}`,
               background: isActive ? T.card : T.bgSub,
-              color: isActive ? T.text : T.textLight,
+              color: isActive ? T.text : T.textMid,
               fontSize: 12, fontWeight: 600,
               fontFamily: T.fontBody,
-              maxWidth: 220, minWidth: 110,
+              maxWidth: 220, minWidth: 90,
               cursor: "pointer",
-              position: "relative",
-              zIndex: isActive ? 3 : 1,
-              // Active tab covers the folder body's top border so the two
-              // pieces read as one continuous shape. -2 (not -1.5) so
-              // subpixel rounding never leaves a hairline gap.
-              marginBottom: isActive ? -2 : 0,
-              boxShadow: isActive ? "0 -1px 2px rgba(0,0,0,0.04)" : "none",
-              transition: "background 0.15s, color 0.15s, padding 0.15s",
+              // Lift the active bubble with a stronger shadow; inactive
+              // bubbles have a lighter shadow so they still feel floating.
+              boxShadow: isActive
+                ? (T.shadow2 || "0 4px 10px rgba(0,0,0,0.10)")
+                : (T.shadow1 || "0 1px 3px rgba(0,0,0,0.06)"),
+              transform: isActive ? "translateY(-1px)" : "translateY(0)",
+              transition: "background 0.15s, color 0.15s, border-color 0.15s, transform 0.15s, box-shadow 0.15s",
               flexShrink: 0,
+              userSelect: "none",
             }}
             onMouseEnter={e => {
-              if (!isActive) { e.currentTarget.style.background = T.card; e.currentTarget.style.color = T.textMid; }
+              if (!isActive) {
+                e.currentTarget.style.background = T.card;
+                e.currentTarget.style.color = T.text;
+                e.currentTarget.style.transform = "translateY(-1px)";
+              }
             }}
             onMouseLeave={e => {
-              if (!isActive) { e.currentTarget.style.background = T.bgSub; e.currentTarget.style.color = T.textLight; }
+              if (!isActive) {
+                e.currentTarget.style.background = T.bgSub;
+                e.currentTarget.style.color = T.textMid;
+                e.currentTarget.style.transform = "translateY(0)";
+              }
             }}
           >
             {isYoutube ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
                 <polygon points="5 3 19 12 5 21 5 3" />
               </svg>
             ) : (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                 <polyline points="14 2 14 8 20 8" />
               </svg>
@@ -855,7 +859,7 @@ function DocTabStrip({ T, openDocIds, activeDocId, loadedDocs, documents, onSele
               onMouseDown={(e) => e.stopPropagation()}
               aria-label={`Close ${title}`}
               style={{
-                width: 18, height: 18, borderRadius: 4, border: "none",
+                width: 18, height: 18, borderRadius: "50%", border: "none",
                 background: "transparent", color: "inherit",
                 cursor: "pointer", padding: 0, flexShrink: 0,
                 display: "flex", alignItems: "center", justifyContent: "center",
