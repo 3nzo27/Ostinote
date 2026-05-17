@@ -172,6 +172,7 @@ export default function WorkspaceView({
   const [ytUrlModal, setYtUrlModal] = useState(false);
   const readerRef = useRef(null);
   const videoRef = useRef(null);
+  const pdfViewerRef = useRef(null);
 
   const activeDoc = activeDocId ? loadedDocs[activeDocId] : null;
   const selectedDeck = selectedDeckId ? (decks || []).find(d => d.id === selectedDeckId) : null;
@@ -315,6 +316,11 @@ export default function WorkspaceView({
       videoRef.current?.seekTo(n);
       return;
     }
+    // Native-PDF view virtualizes pages, so go via the imperative ref.
+    if (activeDoc?.hasPdf) {
+      pdfViewerRef.current?.seekToPage(n);
+      return;
+    }
     const target = document.getElementById(`page-${n}`);
     if (!target) return;
     target.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -322,7 +328,7 @@ export default function WorkspaceView({
     target.style.transition = "background 0.5s ease";
     target.style.background = `${T.easy}15`;
     setTimeout(() => { if (target) target.style.background = orig || "transparent"; }, 1200);
-  }, [T.easy, activeDoc?.type]);
+  }, [T.easy, activeDoc?.type, activeDoc?.hasPdf]);
 
   // Markdown w/ highlights baked in
   const markdownWithHighlights = useMemo(() => {
@@ -620,6 +626,7 @@ export default function WorkspaceView({
                 ) : activeDoc.hasPdf ? (
                   pdfBuffers[activeDoc.id] ? (
                     <PdfViewer
+                      ref={pdfViewerRef}
                       buffer={pdfBuffers[activeDoc.id]}
                       highlights={highlights}
                       onHighlight={(sel) => setSelectionPopover(sel)}

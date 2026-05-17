@@ -1,8 +1,15 @@
-import { useState, useEffect, useRef, useCallback, memo } from "react";
+import { useState, useEffect, useRef, useCallback, useImperativeHandle, forwardRef, memo } from "react";
 import * as pdfjsLib from "pdfjs-dist/build/pdf.mjs";
 import { TextLayerBuilder } from "pdfjs-dist/web/pdf_viewer.mjs";
 import "pdfjs-dist/web/pdf_viewer.css";
 import useTheme from "../../theme/useTheme.js";
+
+// Self-contained worker setup so PdfViewer works even if pdfConverter.js
+// (which also registers the worker) hasn't been imported yet.
+if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+}
 
 const DEFAULT_SCALE = 1.4;
 const BUFFER_PAGES = 2;
@@ -14,7 +21,7 @@ const PAD_BOTTOM = 80;
 const scheduleIdle = window.requestIdleCallback || ((fn) => setTimeout(fn, 200));
 const cancelIdle = window.cancelIdleCallback || clearTimeout;
 
-export default function PdfViewer({ buffer, highlights, onHighlight, onScrollProgress }) {
+const PdfViewer = forwardRef(function PdfViewer({ buffer, highlights, onHighlight, onScrollProgress }, ref) {
   const { T } = useTheme();
   const containerRef = useRef(null);
   const [pdfDoc, setPdfDoc] = useState(null);
@@ -85,6 +92,17 @@ export default function PdfViewer({ buffer, highlights, onHighlight, onScrollPro
   }, [recomputeRange]);
 
   useEffect(() => { recomputeRange(); }, [scale, baseSize, recomputeRange]);
+
+  // Expose a seekToPage(n) method so parents can jump from chat citations
+  // even if the target page isn't currently inside the virtualized window.
+  useImperativeHandle(ref, () => ({
+    seekToPage(n) {
+      const el = containerRef.current;
+      if (!el || !rowH || !n) return;
+      const top = PAD_TOP + (n - 1) * rowH;
+      el.scrollTo({ top, behavior: "smooth" });
+    },
+  }), [rowH]);
 
   const handleTextSelect = useCallback(() => {
     if (!onHighlight) return;
@@ -168,7 +186,9 @@ export default function PdfViewer({ buffer, highlights, onHighlight, onScrollPro
       </div>
     </div>
   );
-}
+});
+
+export default PdfViewer;
 
 function ZoomBtn({ T, onClick, label, children }) {
   return (
