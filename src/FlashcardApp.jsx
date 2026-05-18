@@ -193,6 +193,16 @@ export default function FlashcardApp() {
     setNewDeckName("");
     setShowNewDeck(false);
   };
+  // Parameter-style helper used by the Cards tab in the workspace Tool Bar
+  // (and anywhere else that wants to create a deck without going through
+  // the DecksView transient input state).
+  const createDeckByName = (name) => {
+    const trimmed = (name || "").trim();
+    if (!trimmed) return null;
+    const id = "d_" + Date.now();
+    setDecks(prev => [...prev, { id, name: trimmed, cards: [] }]);
+    return id;
+  };
   const deleteDeck = (id) => setDecks(prev => prev.filter(d => d.id !== id));
   const renameDeck = () => {
     if (!renameValue.trim()) return;
@@ -627,6 +637,7 @@ Respond ONLY with valid JSON, no markdown backticks, in this exact format:
       onEditCardForDeck={editCardForDeck}
       onDeleteCardInDeck={deleteCardInDeck}
       onApplyRatingInDeck={applyRatingInDeck}
+      onCreateDeck={createDeckByName}
       onNavigate={onNavigate}
       onHelpOpen={openHelp}
       user={user}

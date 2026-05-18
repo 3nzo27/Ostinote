@@ -59,6 +59,8 @@ export default function DocumentSidebar({
   // Deck-action handlers used inside the Cards tab.
   onRenameDeck, onStartStudyForDeck, onEditCardForDeck, onDeleteCardInDeck,
   onApplyRatingInDeck,
+  // Cards-tab deck browser/creator wiring.
+  onSelectDeck, onCreateDeck, onDeleteDeck,
 }) {
   const { T } = useTheme();
   // Default to Cards when a deck is already loaded on mount (e.g. after
@@ -322,6 +324,7 @@ export default function DocumentSidebar({
           {activeTab === "cards" && (
             <CardsTab
               deck={selectedDeck}
+              decks={decks}
               aiSettings={aiSettings}
               onRenameDeck={onRenameDeck}
               onAddCardToDeck={onAddCardToDeck}
@@ -330,6 +333,9 @@ export default function DocumentSidebar({
               onApplyRating={(cardId, quality) =>
                 selectedDeck && onApplyRatingInDeck?.(selectedDeck.id, cardId, quality)
               }
+              onSelectDeck={onSelectDeck}
+              onCreateDeck={onCreateDeck}
+              onDeleteDeck={onDeleteDeck}
             />
           )}
           {activeTab === "tools" && (doc ? (

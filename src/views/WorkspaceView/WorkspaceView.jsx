@@ -49,6 +49,7 @@ export default function WorkspaceView({
   // Each takes an explicit deckId since multiple tabs may be open.
   onStartStudyForDeck, onAddCardForDeck, onEditCardForDeck, onDeleteCardInDeck,
   onApplyRatingInDeck,
+  onCreateDeck,
   onNavigate, onHelpOpen, user
 }) {
   const { T } = useTheme();
@@ -252,11 +253,27 @@ export default function WorkspaceView({
   // Clicking a deck in the Library sends it into the Tool Bar's Cards
   // tab (NOT into the reader pane). We also open the Tool Bar if it was
   // collapsed — otherwise the user clicks and nothing visibly happens.
+  // Passing null clears the selection (used by the Cards-tab "back to
+  // decks" affordance).
   const selectDeck = useCallback((deckId) => {
-    if (!deckId) return;
+    if (deckId === null || deckId === undefined) {
+      setSelectedDeckId(null);
+      return;
+    }
     setSelectedDeckId(deckId);
     setStudioOpen(true);
   }, []);
+
+  // Create a deck inline from the Tool Bar's Cards tab and immediately
+  // select it so the user can start adding cards.
+  const handleCreateDeckInline = useCallback((name) => {
+    const id = onCreateDeck?.(name);
+    if (id) {
+      setSelectedDeckId(id);
+      setStudioOpen(true);
+    }
+    return id;
+  }, [onCreateDeck]);
 
   // Reader scroll progress
   useEffect(() => {
@@ -721,6 +738,10 @@ export default function WorkspaceView({
           onEditCardForDeck={onEditCardForDeck}
           onDeleteCardInDeck={onDeleteCardInDeck}
           onApplyRatingInDeck={onApplyRatingInDeck}
+          // Cards-tab deck browser/creator wiring.
+          onSelectDeck={selectDeck}
+          onCreateDeck={handleCreateDeckInline}
+          onDeleteDeck={onDeleteDeck}
           aiSettings={aiSettings}
           decks={decks}
           highlights={highlights}
