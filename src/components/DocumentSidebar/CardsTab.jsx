@@ -261,9 +261,9 @@ function DeckListBackLink({ T, onBack }) {
 }
 
 // Inline deck browser shown inside the Cards tab when no deck is
-// selected. Mirrors the fullscreen Flashcards page (DecksView) at a
-// smaller scale: list rows with due-count badges, a sorted-by-due
-// ordering, and an inline "+ New deck" creator.
+// selected. Reuses the exact LibrarySidebar idiom for section header,
+// section-action button, and deck rows so the two sidebars feel like
+// one design system.
 function DeckBrowser({ T, decks, onSelectDeck, onCreateDeck, onDeleteDeck }) {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
@@ -281,128 +281,124 @@ function DeckBrowser({ T, decks, onSelectDeck, onCreateDeck, onDeleteDeck }) {
 
   const submit = () => {
     const trimmed = newName.trim();
-    if (!trimmed) { setCreating(false); return; }
+    if (!trimmed) { setCreating(false); setNewName(""); return; }
     onCreateDeck?.(trimmed);
     setNewName("");
     setCreating(false);
   };
 
   return (
-    <div style={{ flex: 1, overflowY: "auto", minHeight: 0, padding: "10px 12px 14px" }}>
-      {/* Header */}
+    <div style={{ flex: 1, overflowY: "auto", minHeight: 0, padding: "8px 6px 14px" }}>
+      {/* Section header — mirrors LibrarySidebar's SectionHeader spec:
+          uppercase 11px caps label + inline action button on the right. */}
       <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        marginBottom: 10,
+        display: "flex", alignItems: "center", gap: 6,
+        padding: "5px 8px",
+        color: T.textLight, fontFamily: T.fontBody,
+        fontSize: 11, fontWeight: 700,
+        letterSpacing: 0.8, textTransform: "uppercase",
+        userSelect: "none",
       }}>
-        <span style={{
-          fontSize: 10, fontWeight: 700, color: T.textLight,
-          letterSpacing: 1.2, textTransform: "uppercase",
-          fontFamily: T.fontBody,
-        }}>Decks</span>
+        <span style={{ flex: 1 }}>Decks</span>
         <button
           onClick={() => setCreating(true)}
           title="New deck"
+          aria-label="New deck"
           style={{
             width: 22, height: 22, borderRadius: 6,
-            border: `1.5px solid ${T.border}`, background: T.card,
-            color: T.textMid, cursor: "pointer", padding: 0,
+            border: "none", background: "transparent",
+            cursor: "pointer", color: T.textMid,
             display: "flex", alignItems: "center", justifyContent: "center",
-            transition: "border-color 0.12s, color 0.12s",
+            padding: 0, transition: "background 0.15s, color 0.15s",
           }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.color = T.text; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.color = T.textMid; }}
+          onMouseEnter={e => { e.currentTarget.style.background = T.bgSub; e.currentTarget.style.color = T.text; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = T.textMid; }}
         >
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
           </svg>
         </button>
       </div>
 
-      {/* Inline create input */}
+      {/* Inline create row — same row geometry as a deck row so it
+          replaces the slot inline rather than introducing a new card. */}
       {creating && (
         <div style={{
-          display: "flex", gap: 6, marginBottom: 8,
-          padding: 8, borderRadius: 8,
-          background: T.bgSub, border: `1px solid ${T.border}`,
+          display: "flex", alignItems: "center", gap: 6,
+          padding: "4px 10px", borderRadius: 6,
+          background: T.bgSub,
         }}>
+          <span style={{ width: 10, flexShrink: 0 }} />
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={T.textMid} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+            <rect x="6" y="3" width="14" height="16" rx="2" />
+            <path d="M4 7v12a2 2 0 0 0 2 2h12" />
+          </svg>
           <input
             ref={inputRef}
             value={newName}
             onChange={e => setNewName(e.target.value)}
+            onBlur={submit}
             onKeyDown={e => {
               if (e.key === "Enter") submit();
               if (e.key === "Escape") { setCreating(false); setNewName(""); }
             }}
             placeholder="Deck name…"
             style={{
-              flex: 1, padding: "6px 8px", fontSize: 12.5,
-              borderRadius: 6, border: `1.5px solid ${T.border}`,
-              background: T.card, color: T.text, fontFamily: T.fontBody,
-              outline: "none",
+              flex: 1, minWidth: 0,
+              padding: "2px 4px", fontSize: 13.5,
+              border: "none", outline: "none",
+              background: "transparent", color: T.text, fontFamily: T.fontBody,
             }}
           />
-          <button
-            onClick={submit}
-            style={{
-              padding: "6px 10px", borderRadius: 6, border: "none",
-              background: T.accent || T.text, color: T.white || T.card,
-              fontWeight: 600, fontSize: 11, fontFamily: T.fontBody,
-              cursor: "pointer",
-            }}
-          >Add</button>
         </div>
       )}
 
-      {/* Deck list */}
+      {/* Deck rows — same spec as LibrarySidebar's renderDeckInTree. */}
       {sorted.length === 0 && !creating ? (
         <div style={{
-          padding: "20px 10px", textAlign: "center",
-          fontSize: 12.5, color: T.textLight, fontFamily: T.fontBody, lineHeight: 1.5,
+          padding: "8px 12px 4px",
+          fontSize: 12.5, color: T.textLight, fontFamily: T.fontBody,
+          lineHeight: 1.55,
         }}>
-          No decks yet — tap <strong style={{ color: T.textMid }}>+</strong> to create your first one.
+          No decks yet. Tap <strong style={{ color: T.textMid }}>+</strong> to create your first one.
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          {sorted.map(d => {
-            const dueCount = (d.cards || []).filter(c => c.nextReview <= Date.now()).length;
-            const total = (d.cards || []).length;
-            return (
-              <div
-                key={d.id}
-                onClick={() => onSelectDeck?.(d.id)}
-                style={{
-                  display: "flex", alignItems: "center", gap: 8,
-                  padding: "8px 10px", borderRadius: 8,
-                  background: T.card, border: `1px solid ${T.border}`,
-                  cursor: "pointer", fontFamily: T.fontBody,
-                  transition: "border-color 0.12s, background 0.12s",
-                }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgSub; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.card; }}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={T.textMid} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                  <rect x="6" y="3" width="14" height="16" rx="2" />
-                  <path d="M4 7v12a2 2 0 0 0 2 2h12" />
-                </svg>
+        sorted.map(d => {
+          const dueCount = (d.cards || []).filter(c => c.nextReview <= Date.now()).length;
+          return (
+            <div
+              key={d.id}
+              onClick={() => onSelectDeck?.(d.id)}
+              style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "5px 10px", borderRadius: 6,
+                cursor: "pointer", userSelect: "none",
+                background: "transparent",
+                color: T.textMid, fontFamily: T.fontBody,
+                fontSize: 13.5, fontWeight: 400,
+                transition: "background 0.15s",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = T.bgSub; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+            >
+              <span style={{ width: 10, flexShrink: 0 }} />
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                <rect x="6" y="3" width="14" height="16" rx="2" />
+                <path d="M4 7v12a2 2 0 0 0 2 2h12" />
+              </svg>
+              <span style={{
+                flex: 1, minWidth: 0,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}>{d.name}</span>
+              {dueCount > 0 && (
                 <span style={{
-                  flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: T.text,
-                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                }}>{d.name}</span>
-                {dueCount > 0 ? (
-                  <span style={{
-                    flexShrink: 0, padding: "1px 6px", borderRadius: 999,
-                    background: T.due, color: T.white || "#fff",
-                    fontSize: 10, fontWeight: 700, fontFamily: T.fontBody,
-                  }}>{dueCount}</span>
-                ) : (
-                  <span style={{
-                    flexShrink: 0, fontSize: 10, color: T.textLight, fontWeight: 500,
-                  }}>{total}</span>
-                )}
-              </div>
-            );
-          })}
-        </div>
+                  flexShrink: 0, fontSize: 11, fontWeight: 600, color: T.due,
+                  padding: "0 5px",
+                }}>{dueCount}</span>
+              )}
+            </div>
+          );
+        })
       )}
     </div>
   );
