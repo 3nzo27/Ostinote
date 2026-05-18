@@ -1,5 +1,5 @@
 import useTheme from "../../theme/useTheme.js";
-import NavBar from "../../components/NavBar/NavBar.jsx";
+import TopBar from "../../components/TopBar/TopBar.jsx";
 import WheelPicker from "../../components/WheelPicker/WheelPicker.jsx";
 
 export default function DirectedStudyConfigView({
@@ -7,10 +7,9 @@ export default function DirectedStudyConfigView({
   allTags, dsExpandedRow, setDsExpandedRow,
   dsDeckFilter, setDsDeckFilter, dsTagFilter, setDsTagFilter,
   startDirectedStudy, startShuffleStudy, onNavigate, onHelpOpen,
-  embedded = false,
 }) {
   const { T } = useTheme();
-  const containerStyle = { maxWidth: 640, margin: "0 auto", padding: "calc(24px + var(--sat)) calc(16px + var(--sar)) calc(24px + var(--sab)) calc(16px + var(--sal))", minHeight: "100vh", fontFamily: T.fontBody, background: T.bg };
+  const containerStyle = { maxWidth: 640, margin: "0 auto", padding: "calc(24px + var(--sat)) calc(16px + var(--sar)) calc(24px + var(--sab)) calc(16px + var(--sal))", fontFamily: T.fontBody, width: "100%", boxSizing: "border-box" };
 
   const toggleDeck = (id) => setDsConfig(prev => ({
     ...prev, selectedDecks: prev.selectedDecks.includes(id) ? prev.selectedDecks.filter(d => d !== id) : [...prev.selectedDecks, id]
@@ -96,10 +95,11 @@ export default function DirectedStudyConfigView({
   const canStart = (dsMode === "shuffle" && allDue > 0) || (dsMode === "focus" && finalCount > 0);
 
   return (
-    <div style={embedded ? { maxWidth: 640 } : containerStyle}>
-      {!embedded && <NavBar view="directed" onNavigate={onNavigate} onHelpOpen={onHelpOpen} />}
-      {!embedded && <h2 style={{ fontSize: 22, fontWeight: 700, color: T.text, fontFamily: T.font, marginBottom: 6 }}>Study</h2>}
-      <p style={{ fontSize: 13, color: T.textMid, fontFamily: T.fontBody, marginBottom: 24 }}>Pick your study style</p>
+    <div style={{ minHeight: "100vh", background: T.bg, display: "flex", flexDirection: "column" }}>
+      <TopBar view="decks" onNavigate={onNavigate} />
+      <div style={containerStyle}>
+        <h2 style={{ fontSize: 22, fontWeight: 700, color: T.text, fontFamily: T.fontBody, marginBottom: 6 }}>Focus Study</h2>
+        <p style={{ fontSize: 13, color: T.textMid, fontFamily: T.fontBody, marginBottom: 24 }}>Pick your study style</p>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 16, animation: "fadeIn 0.4s ease" }}>
 
@@ -257,6 +257,7 @@ export default function DirectedStudyConfigView({
             >Begin Study</button>
           </div>
         )}
+      </div>
       </div>
     </div>
   );
