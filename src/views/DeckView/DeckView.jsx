@@ -34,7 +34,7 @@ export default function DeckView({ activeDeck, dueCards, renamingDeck, setRenami
             autoFocus
             style={{
               width: "100%", padding: inWindow ? "6px 10px" : "10px 14px", border: `1.5px solid ${T.borderStrong}`, borderRadius: T.radius,
-              fontSize: inWindow ? 14 : 20, fontWeight: 700, outline: "none", fontFamily: T.font, color: T.text, background: T.inputBg,
+              fontSize: inWindow ? 14 : 20, fontWeight: 700, outline: "none", fontFamily: T.fontBody, color: T.text, background: T.inputBg,
               marginBottom: 8, boxSizing: "border-box"
             }} />
           <div style={{ display: "flex", gap: 6 }}>
@@ -58,7 +58,7 @@ export default function DeckView({ activeDeck, dueCards, renamingDeck, setRenami
           onMouseEnter={e => { const btn = e.currentTarget.querySelector('[data-rename]'); if (btn) btn.style.opacity = "1"; }}
           onMouseLeave={e => { const btn = e.currentTarget.querySelector('[data-rename]'); if (btn) btn.style.opacity = "0"; }}
         >
-          <h2 style={{ fontSize: sz.h1, fontWeight: 700, color: T.text, fontFamily: T.font }}>{activeDeck.name}</h2>
+          <h2 style={{ fontSize: sz.h1, fontWeight: 700, color: T.text, fontFamily: T.fontBody }}>{activeDeck.name}</h2>
           <button data-rename onClick={() => { setRenameValue(activeDeck.name); setRenamingDeck(true); }} style={{
             padding: "4px 10px", borderRadius: 6, border: `1.5px solid ${T.border}`,
             background: T.white, fontSize: 11, cursor: "pointer", color: T.textLight,

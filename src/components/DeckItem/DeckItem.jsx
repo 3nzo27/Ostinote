@@ -14,7 +14,7 @@ export default function DeckItem({ deck, onSelect, onDelete }) {
       onMouseLeave={e => { e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = T.shadow2; }}
     >
       <div>
-        <div style={{ fontSize: 17, fontWeight: 600, color: T.text, fontFamily: T.font }}>{deck.name}</div>
+        <div style={{ fontSize: 17, fontWeight: 600, color: T.text, fontFamily: T.fontBody }}>{deck.name}</div>
         <div style={{ fontSize: 13, color: T.textMid, marginTop: 5, fontFamily: T.fontBody }}>
           {deck.cards.length} card{deck.cards.length !== 1 ? "s" : ""} · <span style={{ color: dueCount > 0 ? T.due : T.done, fontWeight: 600 }}>{dueCount} due</span>
         </div>

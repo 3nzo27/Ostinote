@@ -292,7 +292,7 @@ function DeckBrowser({ T, decks, onSelectDeck, onCreateDeck, onDeleteDeck }) {
   if (sorted.length === 0 && !showNewDeck) {
     return (
       <div style={{ flex: 1, overflowY: "auto", minHeight: 0, padding: "20px 16px" }}>
-        <h2 style={{ fontSize: 18, fontWeight: 700, color: T.text, fontFamily: T.font, marginBottom: 12 }}>All Decks</h2>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: T.text, fontFamily: T.fontBody, marginBottom: 12 }}>All Decks</h2>
         <div style={{
           display: "flex", flexDirection: "column", alignItems: "center",
           padding: "32px 16px", textAlign: "center", animation: "fadeIn 0.4s ease",
@@ -324,7 +324,7 @@ function DeckBrowser({ T, decks, onSelectDeck, onCreateDeck, onDeleteDeck }) {
 
   return (
     <div style={{ flex: 1, overflowY: "auto", minHeight: 0, padding: "20px 16px 24px" }}>
-      <h2 style={{ fontSize: 18, fontWeight: 700, color: T.text, fontFamily: T.font, marginBottom: 12 }}>All Decks</h2>
+      <h2 style={{ fontSize: 18, fontWeight: 700, color: T.text, fontFamily: T.fontBody, marginBottom: 12 }}>All Decks</h2>
 
       {/* Deck list — single column of DeckItem cards (the sidebar isn't
           wide enough for the DecksView grid). */}
