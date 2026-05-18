@@ -206,17 +206,29 @@ export default function WorkspaceView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openDocIds]);
 
-  // Load PDF blob for active doc only — release inactive buffers to save memory.
+  // Load PDF blob for active doc only — release inactive buffers to save
+  // memory. We aggressively clear pdfBuffers in any case where we're not
+  // actively viewing a PDF, so switching to a video or markdown tab
+  // doesn't leave a multi-MB ArrayBuffer pinned in React state.
   useEffect(() => {
-    if (!activeDocId) return;
+    if (!activeDocId) {
+      setPdfBuffers(prev => (Object.keys(prev).length ? {} : prev));
+      return;
+    }
     const doc = loadedDocs[activeDocId];
-    if (!doc?.hasPdf) return;
+    if (!doc?.hasPdf) {
+      setPdfBuffers(prev => (Object.keys(prev).length ? {} : prev));
+      return;
+    }
+    // Already loaded for the current doc — don't refetch.
+    if (pdfBuffers[activeDocId]) return;
     let cancelled = false;
     getPdfBlob(activeDocId).then(buf => {
       if (cancelled || !buf) return;
       setPdfBuffers({ [activeDocId]: buf });
     });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeDocId, loadedDocs]);
 
   // Highlights follow the active doc.

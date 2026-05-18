@@ -42,15 +42,29 @@ const PdfViewer = forwardRef(function PdfViewer({ buffer, highlights, onHighligh
   useEffect(() => {
     if (!buffer) return;
     let cancelled = false;
-    pdfjsLib.getDocument({ data: buffer.slice(0) }).promise.then(doc => {
-      if (cancelled) return;
+    // Capture the loaded doc in a local so the cleanup function can
+    // actually destroy IT — reading `pdfDoc` from the closure here
+    // would always see the stale value (null on first run) and leave
+    // the document + all its cached pages leaking on every buffer swap.
+    let loadedDoc = null;
+    const loadingTask = pdfjsLib.getDocument({ data: buffer.slice(0) });
+    loadingTask.promise.then(doc => {
+      if (cancelled) {
+        try { doc.destroy(); } catch {}
+        return;
+      }
+      loadedDoc = doc;
       setPdfDoc(doc);
     }).catch(err => {
       if (!cancelled) setError(err.message || "Failed to load PDF");
     });
     return () => {
       cancelled = true;
-      if (pdfDoc) pdfDoc.destroy();
+      try { loadingTask.destroy(); } catch {}
+      if (loadedDoc) {
+        try { loadedDoc.destroy(); } catch {}
+      }
+      setPdfDoc(null);
     };
   }, [buffer]);
 
@@ -212,6 +226,7 @@ const PageCanvas = memo(function PageCanvas({ pdfDoc, pageNum, scale, T, top, wi
   const canvasRef = useRef(null);
   const textRef = useRef(null);
   const taskRef = useRef(null);
+  const builderRef = useRef(null);
   const idleRef = useRef(0);
 
   useEffect(() => {
@@ -219,8 +234,19 @@ const PageCanvas = memo(function PageCanvas({ pdfDoc, pageNum, scale, T, top, wi
     let page = null;
 
     (async () => {
-      page = await pdfDoc.getPage(pageNum);
-      if (cancelled) return;
+      try {
+        page = await pdfDoc.getPage(pageNum);
+      } catch {
+        return; // pdfDoc destroyed mid-fetch — nothing to clean up
+      }
+      // If we got the page back AFTER the user scrolled away or switched
+      // docs, release it immediately rather than leaving it in pdfjs's
+      // cache forever.
+      if (cancelled) {
+        try { page.cleanup(); } catch {}
+        page = null;
+        return;
+      }
 
       const viewport = page.getViewport({ scale });
       const canvas = canvasRef.current;
@@ -253,6 +279,7 @@ const PageCanvas = memo(function PageCanvas({ pdfDoc, pageNum, scale, T, top, wi
         tlDiv.style.width = `${viewport.width}px`;
         tlDiv.style.height = `${viewport.height}px`;
         const builder = new TextLayerBuilder({ pdfPage: page });
+        builderRef.current = builder;
         tlDiv.appendChild(builder.div);
         builder.render({ viewport });
       }, { timeout: 500 });
@@ -263,11 +290,20 @@ const PageCanvas = memo(function PageCanvas({ pdfDoc, pageNum, scale, T, top, wi
       cancelIdle(idleRef.current);
       if (taskRef.current) try { taskRef.current.cancel(); } catch {}
       taskRef.current = null;
+      // Cancel the text-layer builder so its in-flight work + spans
+      // get released. Without this, every scroll-induced unmount leaks
+      // a chunk of DOM the GC can't reach.
+      if (builderRef.current) {
+        try { builderRef.current.cancel(); } catch {}
+        builderRef.current = null;
+      }
       const c = canvasRef.current;
       if (c) { c.width = 1; c.height = 1; }
       const t = textRef.current;
       if (t) t.innerHTML = "";
-      if (page) page.cleanup();
+      if (page) {
+        try { page.cleanup(); } catch {}
+      }
     };
   }, [pdfDoc, pageNum, scale]);
 
