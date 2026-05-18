@@ -13,6 +13,8 @@ import useTheme from "../../theme/useTheme.js";
 import DeckView from "../../views/DeckView/DeckView.jsx";
 import StudyView from "../../views/StudyView/StudyView.jsx";
 import CardEditor from "../CardEditor/CardEditor.jsx";
+import DeckItem from "../DeckItem/DeckItem.jsx";
+import DeleteConfirmModal from "../DeleteConfirmModal/DeleteConfirmModal.jsx";
 import { gradeCardAnswer } from "../../utils/gradeCardAnswer.js";
 
 export default function CardsTab({
@@ -261,15 +263,13 @@ function DeckListBackLink({ T, onBack }) {
 }
 
 // Inline deck browser shown inside the Cards tab when no deck is
-// selected. Reuses the exact LibrarySidebar idiom for section header,
-// section-action button, and deck rows so the two sidebars feel like
-// one design system.
+// selected. Mirrors the standalone-app DecksView: DeckItem cards in a
+// single column, inline create form, dashed "+ New Deck" button at the
+// bottom, and the original empty-state illustration.
 function DeckBrowser({ T, decks, onSelectDeck, onCreateDeck, onDeleteDeck }) {
-  const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState("");
-  const inputRef = useRef(null);
-
-  useEffect(() => { if (creating) inputRef.current?.focus(); }, [creating]);
+  const [showNewDeck, setShowNewDeck] = useState(false);
+  const [newDeckName, setNewDeckName] = useState("");
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const sorted = useMemo(() => {
     return [...(decks || [])].sort((a, b) => {
@@ -279,126 +279,132 @@ function DeckBrowser({ T, decks, onSelectDeck, onCreateDeck, onDeleteDeck }) {
     });
   }, [decks]);
 
-  const submit = () => {
-    const trimmed = newName.trim();
-    if (!trimmed) { setCreating(false); setNewName(""); return; }
+  const submitNew = () => {
+    const trimmed = newDeckName.trim();
+    if (!trimmed) return;
     onCreateDeck?.(trimmed);
-    setNewName("");
-    setCreating(false);
+    setNewDeckName("");
+    setShowNewDeck(false);
   };
 
-  return (
-    <div style={{ flex: 1, overflowY: "auto", minHeight: 0, padding: "8px 6px 14px" }}>
-      {/* Section header — mirrors LibrarySidebar's SectionHeader spec:
-          uppercase 11px caps label + inline action button on the right. */}
-      <div style={{
-        display: "flex", alignItems: "center", gap: 6,
-        padding: "5px 8px",
-        color: T.textLight, fontFamily: T.fontBody,
-        fontSize: 11, fontWeight: 700,
-        letterSpacing: 0.8, textTransform: "uppercase",
-        userSelect: "none",
-      }}>
-        <span style={{ flex: 1 }}>Decks</span>
-        <button
-          onClick={() => setCreating(true)}
-          title="New deck"
-          aria-label="New deck"
-          style={{
-            width: 22, height: 22, borderRadius: 6,
-            border: "none", background: "transparent",
-            cursor: "pointer", color: T.textMid,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            padding: 0, transition: "background 0.15s, color 0.15s",
-          }}
-          onMouseEnter={e => { e.currentTarget.style.background = T.bgSub; e.currentTarget.style.color = T.text; }}
-          onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = T.textMid; }}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+  // Empty state — same illustration + "Create Your First Deck" CTA as
+  // the original standalone DecksView.
+  if (sorted.length === 0 && !showNewDeck) {
+    return (
+      <div style={{ flex: 1, overflowY: "auto", minHeight: 0, padding: "20px 16px" }}>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: T.text, fontFamily: T.font, marginBottom: 12 }}>All Decks</h2>
+        <div style={{
+          display: "flex", flexDirection: "column", alignItems: "center",
+          padding: "32px 16px", textAlign: "center", animation: "fadeIn 0.4s ease",
+        }}>
+          <svg width="56" height="56" viewBox="0 0 64 64" fill="none" style={{ marginBottom: 16, opacity: 0.65 }}>
+            <rect x="10" y="14" width="34" height="40" rx="4" stroke={T.textLight} strokeWidth="1.5" fill="none" />
+            <rect x="20" y="8" width="34" height="40" rx="4" stroke={T.textLight} strokeWidth="1.5" fill={T.card} />
+            <line x1="28" y1="20" x2="46" y2="20" stroke={T.textLight} strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="28" y1="28" x2="42" y2="28" stroke={T.textLight} strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
+            <line x1="28" y1="36" x2="44" y2="36" stroke={T.textLight} strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
+            <circle cx="47" cy="43" r="10" fill={T.accent} opacity="0.15" />
+            <line x1="43" y1="43" x2="51" y2="43" stroke={T.accent} strokeWidth="2" strokeLinecap="round" />
+            <line x1="47" y1="39" x2="47" y2="47" stroke={T.accent} strokeWidth="2" strokeLinecap="round" />
           </svg>
-        </button>
+          <p style={{ fontSize: 15, fontWeight: 600, color: T.text, fontFamily: T.fontBody, marginBottom: 6 }}>No decks yet</p>
+          <p style={{ fontSize: 13, color: T.textMid, fontFamily: T.fontBody, marginBottom: 20, lineHeight: 1.5 }}>
+            Create your first deck to start learning with spaced repetition
+          </p>
+          <button onClick={() => setShowNewDeck(true)} style={{
+            padding: "10px 22px", borderRadius: T.radius, border: "none",
+            background: T.accent, color: T.white, fontWeight: 600, fontSize: 13,
+            cursor: "pointer", fontFamily: T.fontBody,
+            boxShadow: "0 2px 8px rgba(44,42,37,0.2)", transition: "all 0.15s",
+          }}>Create Your First Deck</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ flex: 1, overflowY: "auto", minHeight: 0, padding: "20px 16px 24px" }}>
+      <h2 style={{ fontSize: 18, fontWeight: 700, color: T.text, fontFamily: T.font, marginBottom: 12 }}>All Decks</h2>
+
+      {/* Deck list — single column of DeckItem cards (the sidebar isn't
+          wide enough for the DecksView grid). */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, animation: "fadeIn 0.3s ease" }}>
+        {sorted.map(deck => (
+          <DeckItem
+            key={deck.id}
+            deck={deck}
+            onSelect={() => onSelectDeck?.(deck.id)}
+            onDelete={() => setConfirmDeleteId(deck.id)}
+          />
+        ))}
       </div>
 
-      {/* Inline create row — same row geometry as a deck row so it
-          replaces the slot inline rather than introducing a new card. */}
-      {creating && (
+      {/* Inline create form / "+ New Deck" dashed button — same as the
+          original standalone DecksView (just scaled in for sidebar width). */}
+      {showNewDeck ? (
         <div style={{
-          display: "flex", alignItems: "center", gap: 6,
-          padding: "4px 10px", borderRadius: 6,
-          background: T.bgSub,
+          marginTop: 12, padding: 16,
+          background: T.card, borderRadius: T.radiusLg,
+          border: `1px solid ${T.borderStrong}`, boxShadow: T.shadow2,
+          animation: "fadeIn 0.3s ease",
         }}>
-          <span style={{ width: 10, flexShrink: 0 }} />
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={T.textMid} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-            <rect x="6" y="3" width="14" height="16" rx="2" />
-            <path d="M4 7v12a2 2 0 0 0 2 2h12" />
-          </svg>
           <input
-            ref={inputRef}
-            value={newName}
-            onChange={e => setNewName(e.target.value)}
-            onBlur={submit}
-            onKeyDown={e => {
-              if (e.key === "Enter") submit();
-              if (e.key === "Escape") { setCreating(false); setNewName(""); }
-            }}
-            placeholder="Deck name…"
+            value={newDeckName}
+            onChange={e => setNewDeckName(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && submitNew()}
+            placeholder="Deck name..."
+            autoFocus
             style={{
-              flex: 1, minWidth: 0,
-              padding: "2px 4px", fontSize: 13.5,
-              border: "none", outline: "none",
-              background: "transparent", color: T.text, fontFamily: T.fontBody,
+              width: "100%", padding: "9px 12px",
+              border: `1.5px solid ${T.border}`, borderRadius: T.radius,
+              fontSize: 14, outline: "none", marginBottom: 10,
+              fontFamily: T.fontBody, color: T.text, background: T.inputBg,
+              boxSizing: "border-box",
             }}
           />
-        </div>
-      )}
-
-      {/* Deck rows — same spec as LibrarySidebar's renderDeckInTree. */}
-      {sorted.length === 0 && !creating ? (
-        <div style={{
-          padding: "8px 12px 4px",
-          fontSize: 12.5, color: T.textLight, fontFamily: T.fontBody,
-          lineHeight: 1.55,
-        }}>
-          No decks yet. Tap <strong style={{ color: T.textMid }}>+</strong> to create your first one.
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button
+              onClick={() => { setShowNewDeck(false); setNewDeckName(""); }}
+              style={{
+                padding: "7px 14px", borderRadius: T.radius,
+                border: `1.5px solid ${T.border}`, background: T.white,
+                cursor: "pointer", fontSize: 12, color: T.textMid, fontFamily: T.fontBody,
+              }}
+            >Cancel</button>
+            <button
+              onClick={submitNew}
+              style={{
+                padding: "7px 14px", borderRadius: T.radius, border: "none",
+                background: T.accent, color: T.white,
+                fontWeight: 600, fontSize: 12, cursor: "pointer", fontFamily: T.fontBody,
+                boxShadow: "0 2px 8px rgba(44,42,37,0.2)",
+              }}
+            >Create</button>
+          </div>
         </div>
       ) : (
-        sorted.map(d => {
-          const dueCount = (d.cards || []).filter(c => c.nextReview <= Date.now()).length;
-          return (
-            <div
-              key={d.id}
-              onClick={() => onSelectDeck?.(d.id)}
-              style={{
-                display: "flex", alignItems: "center", gap: 6,
-                padding: "5px 10px", borderRadius: 6,
-                cursor: "pointer", userSelect: "none",
-                background: "transparent",
-                color: T.textMid, fontFamily: T.fontBody,
-                fontSize: 13.5, fontWeight: 400,
-                transition: "background 0.15s",
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = T.bgSub; }}
-              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
-            >
-              <span style={{ width: 10, flexShrink: 0 }} />
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                <rect x="6" y="3" width="14" height="16" rx="2" />
-                <path d="M4 7v12a2 2 0 0 0 2 2h12" />
-              </svg>
-              <span style={{
-                flex: 1, minWidth: 0,
-                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-              }}>{d.name}</span>
-              {dueCount > 0 && (
-                <span style={{
-                  flexShrink: 0, fontSize: 11, fontWeight: 600, color: T.due,
-                  padding: "0 5px",
-                }}>{dueCount}</span>
-              )}
-            </div>
-          );
-        })
+        <button
+          onClick={() => setShowNewDeck(true)}
+          style={{
+            marginTop: 12, width: "100%", padding: "14px",
+            borderRadius: T.radiusLg,
+            border: `2px dashed ${T.borderStrong}`,
+            background: "transparent",
+            color: T.textMid, fontSize: 13, fontWeight: 500,
+            cursor: "pointer", transition: "all 0.2s",
+            fontFamily: T.fontBody,
+          }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = T.text; e.currentTarget.style.color = T.text; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.color = T.textMid; }}
+        >+ New Deck</button>
+      )}
+
+      {confirmDeleteId && (
+        <DeleteConfirmModal
+          deckName={(decks || []).find(d => d.id === confirmDeleteId)?.name}
+          onCancel={() => setConfirmDeleteId(null)}
+          onConfirm={() => { onDeleteDeck?.(confirmDeleteId); setConfirmDeleteId(null); }}
+        />
       )}
     </div>
   );
