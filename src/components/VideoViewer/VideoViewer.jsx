@@ -35,6 +35,7 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [playerReady, setPlayerReady] = useState(false);
   const pollRef = useRef(0);
 
   const transcript = doc?.transcript || [];
@@ -62,6 +63,7 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
             if (destroyed) return;
             playerRef.current = player;
             setDuration(player.getDuration?.() || 0);
+            setPlayerReady(true);
           },
           onStateChange: (e) => {
             if (destroyed) return;
@@ -80,8 +82,40 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
       clearInterval(pollRef.current);
       if (player?.destroy) try { player.destroy(); } catch {}
       playerRef.current = null;
+      setPlayerReady(false);
     };
   }, [doc?.videoId]);
+
+  // Tell the YT player about container size changes so it actually
+  // redraws after a Tool Bar resize. Without this, the iframe stretches
+  // via CSS but YouTube's internal video element keeps the old
+  // dimensions and the picture only re-fits after some delayed event
+  // (window blur, full-screen toggle, etc).
+  useEffect(() => {
+    if (!playerReady) return;
+    const el = containerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let rafId = 0;
+    const apply = () => {
+      const player = playerRef.current;
+      if (!player?.setSize) return;
+      const w = Math.round(el.clientWidth);
+      const h = Math.round(el.clientHeight);
+      if (w > 0 && h > 0) {
+        try { player.setSize(w, h); } catch {}
+      }
+    };
+    const ro = new ResizeObserver(() => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(apply);
+    });
+    ro.observe(el);
+    apply(); // initial sync after ready
+    return () => {
+      cancelAnimationFrame(rafId);
+      ro.disconnect();
+    };
+  }, [playerReady]);
 
   useEffect(() => {
     clearInterval(pollRef.current);

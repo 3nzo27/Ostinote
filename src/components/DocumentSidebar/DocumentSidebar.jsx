@@ -206,6 +206,22 @@ export default function DocumentSidebar({
         />
       )}
 
+      {/* Drag-time overlay. Fixed full-viewport, transparent, sits above
+          everything — including the YouTube iframe in the middle pane,
+          which would otherwise capture mousemove and stutter the drag.
+          Disappears the moment the user releases. */}
+      {resizing && (
+        <div
+          style={{
+            position: "fixed", inset: 0,
+            zIndex: 99999, cursor: "ew-resize",
+            // Background is transparent but `background` is still needed
+            // so the div has a hit area on every browser.
+            background: "transparent",
+          }}
+        />
+      )}
+
       {/* RAIL LAYER */}
       <div style={{
         position: "absolute", inset: 0,
