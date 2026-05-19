@@ -685,6 +685,7 @@ export default function WorkspaceView({
                     pdfBuffers[activeDoc.id] ? (
                       <PdfViewer
                         ref={pdfViewerRef}
+                        docId={activeDoc.id}
                         buffer={pdfBuffers[activeDoc.id]}
                         highlights={highlights}
                         onHighlight={(sel) => setSelectionPopover(sel)}

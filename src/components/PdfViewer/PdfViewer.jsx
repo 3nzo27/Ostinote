@@ -21,15 +21,43 @@ const PAD_BOTTOM = 80;
 const scheduleIdle = window.requestIdleCallback || ((fn) => setTimeout(fn, 200));
 const cancelIdle = window.cancelIdleCallback || clearTimeout;
 
-const PdfViewer = forwardRef(function PdfViewer({ buffer, highlights, onHighlight, onScrollProgress }, ref) {
+// Per-doc scroll + zoom persistence. Lives in localStorage as
+//   ostinote_pdf_state_<docId> -> { scrollTop, scale }
+// so a refresh / tab switch / view change drops the user back exactly
+// where they left off, at the same zoom.
+const PDF_STATE_PREFIX = "ostinote_pdf_state_";
+function readPdfState(docId) {
+  if (!docId) return null;
+  try { return JSON.parse(localStorage.getItem(PDF_STATE_PREFIX + docId) || "null"); }
+  catch { return null; }
+}
+function writePdfState(docId, state) {
+  if (!docId) return;
+  try { localStorage.setItem(PDF_STATE_PREFIX + docId, JSON.stringify(state)); }
+  catch {}
+}
+
+const PdfViewer = forwardRef(function PdfViewer({ buffer, docId, highlights, onHighlight, onScrollProgress }, ref) {
   const { T } = useTheme();
   const containerRef = useRef(null);
   const [pdfDoc, setPdfDoc] = useState(null);
-  const [scale, setScale] = useState(DEFAULT_SCALE);
+  const [scale, setScale] = useState(() => {
+    const saved = readPdfState(docId);
+    return saved?.scale || DEFAULT_SCALE;
+  });
   const [error, setError] = useState(null);
   const [baseSize, setBaseSize] = useState(null);
   const [visibleRange, setVisibleRange] = useState([1, 1]);
   const rafId = useRef(0);
+  // Track which docId we've already restored scroll for so we don't
+  // fight the user every time they scroll.
+  const restoredForRef = useRef(null);
+  // Keep latest scale/docId in refs so the persistent scroll handler
+  // can read them without re-attaching every render.
+  const scaleRef = useRef(scale);
+  const docIdRef = useRef(docId);
+  useEffect(() => { scaleRef.current = scale; }, [scale]);
+  useEffect(() => { docIdRef.current = docId; }, [docId]);
 
   const numPages = pdfDoc?.numPages || 0;
   const pageW = baseSize ? Math.floor(baseSize.width * scale) : 0;
@@ -106,6 +134,64 @@ const PdfViewer = forwardRef(function PdfViewer({ buffer, highlights, onHighligh
   }, [recomputeRange]);
 
   useEffect(() => { recomputeRange(); }, [scale, baseSize, recomputeRange]);
+
+  // When the active docId changes, pick up THAT doc's saved scale.
+  useEffect(() => {
+    const saved = readPdfState(docId);
+    setScale(saved?.scale || DEFAULT_SCALE);
+    // Reset restore guard so we restore scroll for the new doc.
+    restoredForRef.current = null;
+  }, [docId]);
+
+  // Once pdfDoc + baseSize are ready for THIS doc, restore the saved
+  // scrollTop exactly once. requestAnimationFrame lets the totalHeight
+  // be applied to the DOM first so the scroll actually lands.
+  useEffect(() => {
+    if (!docId || !pdfDoc || !baseSize) return;
+    if (restoredForRef.current === docId) return;
+    restoredForRef.current = docId;
+    const saved = readPdfState(docId);
+    if (!saved?.scrollTop) return;
+    requestAnimationFrame(() => {
+      const el = containerRef.current;
+      if (el) el.scrollTop = saved.scrollTop;
+    });
+  }, [docId, pdfDoc, baseSize]);
+
+  // Persist scroll position (debounced) + write on unmount. Attached
+  // once and reads docId/scale from refs so we don't lose listeners
+  // every time scale changes.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    let timer = 0;
+    const save = () => {
+      if (docIdRef.current) {
+        writePdfState(docIdRef.current, {
+          scrollTop: el.scrollTop,
+          scale: scaleRef.current,
+        });
+      }
+    };
+    const handler = () => {
+      clearTimeout(timer);
+      timer = setTimeout(save, 200);
+    };
+    el.addEventListener("scroll", handler, { passive: true });
+    return () => {
+      clearTimeout(timer);
+      el.removeEventListener("scroll", handler);
+      save();
+    };
+  }, []);
+
+  // Also persist immediately when the user zooms — otherwise a refresh
+  // right after a zoom would restore the old scale.
+  useEffect(() => {
+    if (!docId) return;
+    const el = containerRef.current;
+    writePdfState(docId, { scrollTop: el?.scrollTop || 0, scale });
+  }, [docId, scale]);
 
   // Expose a seekToPage(n) method so parents can jump from chat citations
   // even if the target page isn't currently inside the virtualized window.
