@@ -56,6 +56,11 @@ const PdfViewer = forwardRef(function PdfViewer({ buffer, docId, highlights, onH
   // can read them without re-attaching every render.
   const scaleRef = useRef(scale);
   const docIdRef = useRef(docId);
+  // Snapshot the latest scrollTop on every scroll event. Cleanup-time
+  // saves read this instead of containerRef.scrollTop because when
+  // WorkspaceView unmounts (navigating to Dashboard/Flashcards) the
+  // DOM can already be torn down by the time the cleanup runs.
+  const lastScrollRef = useRef(0);
   useEffect(() => { scaleRef.current = scale; }, [scale]);
   useEffect(() => { docIdRef.current = docId; }, [docId]);
 
@@ -145,13 +150,20 @@ const PdfViewer = forwardRef(function PdfViewer({ buffer, docId, highlights, onH
 
   // Once pdfDoc + baseSize are ready for THIS doc, restore the saved
   // scrollTop exactly once. requestAnimationFrame lets the totalHeight
-  // be applied to the DOM first so the scroll actually lands.
+  // be applied to the DOM first so the scroll actually lands. We also
+  // seed lastScrollRef so a save fired before the user's first scroll
+  // (e.g. immediately navigating away) doesn't overwrite the saved
+  // position with 0.
   useEffect(() => {
     if (!docId || !pdfDoc || !baseSize) return;
     if (restoredForRef.current === docId) return;
     restoredForRef.current = docId;
     const saved = readPdfState(docId);
-    if (!saved?.scrollTop) return;
+    if (!saved?.scrollTop) {
+      lastScrollRef.current = 0;
+      return;
+    }
+    lastScrollRef.current = saved.scrollTop;
     requestAnimationFrame(() => {
       const el = containerRef.current;
       if (el) el.scrollTop = saved.scrollTop;
@@ -160,7 +172,9 @@ const PdfViewer = forwardRef(function PdfViewer({ buffer, docId, highlights, onH
 
   // Persist scroll position (debounced) + write on unmount. Attached
   // once and reads docId/scale from refs so we don't lose listeners
-  // every time scale changes.
+  // every time scale changes. The handler snapshots scrollTop into a
+  // ref synchronously so the unmount-time save can use it even if the
+  // DOM is gone by then.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -168,19 +182,25 @@ const PdfViewer = forwardRef(function PdfViewer({ buffer, docId, highlights, onH
     const save = () => {
       if (docIdRef.current) {
         writePdfState(docIdRef.current, {
-          scrollTop: el.scrollTop,
+          scrollTop: lastScrollRef.current,
           scale: scaleRef.current,
         });
       }
     };
     const handler = () => {
+      lastScrollRef.current = el.scrollTop;
       clearTimeout(timer);
       timer = setTimeout(save, 200);
     };
     el.addEventListener("scroll", handler, { passive: true });
+    // Save before the page unloads (refresh / close) — covers cases
+    // where React doesn't get a clean unmount cycle.
+    const onPageHide = () => save();
+    window.addEventListener("pagehide", onPageHide);
     return () => {
       clearTimeout(timer);
       el.removeEventListener("scroll", handler);
+      window.removeEventListener("pagehide", onPageHide);
       save();
     };
   }, []);
@@ -189,8 +209,7 @@ const PdfViewer = forwardRef(function PdfViewer({ buffer, docId, highlights, onH
   // right after a zoom would restore the old scale.
   useEffect(() => {
     if (!docId) return;
-    const el = containerRef.current;
-    writePdfState(docId, { scrollTop: el?.scrollTop || 0, scale });
+    writePdfState(docId, { scrollTop: lastScrollRef.current, scale });
   }, [docId, scale]);
 
   // Expose a seekToPage(n) method so parents can jump from chat citations
