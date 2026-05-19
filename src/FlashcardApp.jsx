@@ -593,6 +593,49 @@ Respond ONLY with valid JSON, no markdown backticks, in this exact format:
   const onNavigate = (v) => setView(v);
   const onSelectDeck = (deckId) => { setActiveDeckId(deckId); setView("deck"); };
 
+  // Workspace is the heaviest view (PDF parsing, virtualized canvases,
+  // IndexedDB-backed caches). Once the user has visited it, we keep it
+  // mounted across other routes and just toggle display — that way
+  // returning from Dashboard/Flashcards is instant instead of paying
+  // another IDB read + pdfjs parse + first-page render.
+  const [hasVisitedWorkspace, setHasVisitedWorkspace] = useState(view === "workspace");
+  useEffect(() => {
+    if (view === "workspace" && !hasVisitedWorkspace) setHasVisitedWorkspace(true);
+  }, [view, hasVisitedWorkspace]);
+  const workspaceVisible = view === "workspace";
+
+  const workspaceNode = hasVisitedWorkspace ? (
+    <div
+      key="workspace-keepalive"
+      // Keep the workspace tree fully mounted so PdfViewer's pdfDoc,
+      // rendered canvases, and text layers survive nav changes. We use
+      // display:none rather than visibility:hidden so it takes zero
+      // layout space when another view is on top.
+      style={{ display: workspaceVisible ? "block" : "none" }}
+      aria-hidden={!workspaceVisible}
+    >
+      <WorkspaceView
+        decks={decks}
+        aiSettings={aiSettings}
+        onAddCardToDeck={addCardToDeck}
+        onMoveDeck={moveDeckToFolder}
+        onRenameDeck={renameDeckById}
+        onTagDeck={tagDeckById}
+        onDeleteDeck={deleteDeck}
+        onSelectDeck={onSelectDeck}
+        onStartStudyForDeck={startStudyForDeck}
+        onAddCardForDeck={addCardForDeck}
+        onEditCardForDeck={editCardForDeck}
+        onDeleteCardInDeck={deleteCardInDeck}
+        onApplyRatingInDeck={applyRatingInDeck}
+        onCreateDeck={createDeckByName}
+        onNavigate={onNavigate}
+        onHelpOpen={openHelp}
+        user={user}
+      />
+    </div>
+  ) : null;
+
   // --- View Router ---
   const renderView = () => {
   // Dashboard tab → the old Home view (deck list + review calendar).
@@ -610,28 +653,9 @@ Respond ONLY with valid JSON, no markdown backticks, in this exact format:
     />;
   }
   if (view === "workspace") {
-    return <WorkspaceView
-      decks={decks}
-      aiSettings={aiSettings}
-      onAddCardToDeck={addCardToDeck}
-      onMoveDeck={moveDeckToFolder}
-      onRenameDeck={renameDeckById}
-      onTagDeck={tagDeckById}
-      onDeleteDeck={deleteDeck}
-      onSelectDeck={onSelectDeck}
-      // Deck-tab action handlers — let the workspace render a deck tab
-      // with inline rename + delete, plus fullscreen handoff for Study,
-      // Add, and Edit Card.
-      onStartStudyForDeck={startStudyForDeck}
-      onAddCardForDeck={addCardForDeck}
-      onEditCardForDeck={editCardForDeck}
-      onDeleteCardInDeck={deleteCardInDeck}
-      onApplyRatingInDeck={applyRatingInDeck}
-      onCreateDeck={createDeckByName}
-      onNavigate={onNavigate}
-      onHelpOpen={openHelp}
-      user={user}
-    />;
+    // Rendered separately via workspaceNode so it persists across
+    // other routes. See the hasVisitedWorkspace setup above.
+    return null;
   }
 
   if (view === "decks") {
@@ -745,6 +769,7 @@ Respond ONLY with valid JSON, no markdown backticks, in this exact format:
 
   return (
     <div style={{ minHeight: "100vh", background: T.bg }}>
+      {workspaceNode}
       {renderView()}
       {showHelp && <HelpModal onClose={closeHelp} onReplayOnboarding={replayOnboarding} />}
       {showOnboarding && <Onboarding onComplete={completeOnboarding} />}
