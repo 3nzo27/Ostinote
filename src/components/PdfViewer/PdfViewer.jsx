@@ -25,16 +25,25 @@ const cancelIdle = window.cancelIdleCallback || clearTimeout;
 //   ostinote_pdf_state_<docId> -> { scrollTop, scale }
 // so a refresh / tab switch / view change drops the user back exactly
 // where they left off, at the same zoom.
+//
+// CRITICAL: each save must only touch its own field. A naive
+// `writePdfState(id, { scrollTop, scale })` from the zoom-save effect
+// runs on mount (before the restore effect fires), reads `0` from a
+// fresh lastScrollRef, and clobbers the just-saved scrollTop with 0
+// — so when restore reads localStorage it lands at the top. Use
+// mergePdfState to update fields independently.
 const PDF_STATE_PREFIX = "ostinote_pdf_state_";
 function readPdfState(docId) {
   if (!docId) return null;
   try { return JSON.parse(localStorage.getItem(PDF_STATE_PREFIX + docId) || "null"); }
   catch { return null; }
 }
-function writePdfState(docId, state) {
+function mergePdfState(docId, patch) {
   if (!docId) return;
-  try { localStorage.setItem(PDF_STATE_PREFIX + docId, JSON.stringify(state)); }
-  catch {}
+  try {
+    const prev = JSON.parse(localStorage.getItem(PDF_STATE_PREFIX + docId) || "null") || {};
+    localStorage.setItem(PDF_STATE_PREFIX + docId, JSON.stringify({ ...prev, ...patch }));
+  } catch {}
 }
 
 const PdfViewer = forwardRef(function PdfViewer({ buffer, docId, highlights, onHighlight, onScrollProgress }, ref) {
@@ -140,10 +149,14 @@ const PdfViewer = forwardRef(function PdfViewer({ buffer, docId, highlights, onH
 
   useEffect(() => { recomputeRange(); }, [scale, baseSize, recomputeRange]);
 
-  // When the active docId changes, pick up THAT doc's saved scale.
+  // When the active docId changes, pick up THAT doc's saved scale AND
+  // seed lastScrollRef from the saved scrollTop so that a save fired
+  // before the restore effect runs (e.g. user opens the PDF and immediately
+  // navigates away) doesn't write 0 over the real saved position.
   useEffect(() => {
     const saved = readPdfState(docId);
     setScale(saved?.scale || DEFAULT_SCALE);
+    lastScrollRef.current = saved?.scrollTop || 0;
     // Reset restore guard so we restore scroll for the new doc.
     restoredForRef.current = null;
   }, [docId]);
@@ -174,42 +187,42 @@ const PdfViewer = forwardRef(function PdfViewer({ buffer, docId, highlights, onH
   // once and reads docId/scale from refs so we don't lose listeners
   // every time scale changes. The handler snapshots scrollTop into a
   // ref synchronously so the unmount-time save can use it even if the
-  // DOM is gone by then.
+  // DOM is gone by then. Only writes scrollTop — scale lives in its
+  // own write so the two can't clobber each other.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     let timer = 0;
-    const save = () => {
+    const saveScroll = () => {
       if (docIdRef.current) {
-        writePdfState(docIdRef.current, {
-          scrollTop: lastScrollRef.current,
-          scale: scaleRef.current,
-        });
+        mergePdfState(docIdRef.current, { scrollTop: lastScrollRef.current });
       }
     };
     const handler = () => {
       lastScrollRef.current = el.scrollTop;
       clearTimeout(timer);
-      timer = setTimeout(save, 200);
+      timer = setTimeout(saveScroll, 200);
     };
     el.addEventListener("scroll", handler, { passive: true });
     // Save before the page unloads (refresh / close) — covers cases
     // where React doesn't get a clean unmount cycle.
-    const onPageHide = () => save();
+    const onPageHide = () => saveScroll();
     window.addEventListener("pagehide", onPageHide);
     return () => {
       clearTimeout(timer);
       el.removeEventListener("scroll", handler);
       window.removeEventListener("pagehide", onPageHide);
-      save();
+      saveScroll();
     };
   }, []);
 
-  // Also persist immediately when the user zooms — otherwise a refresh
-  // right after a zoom would restore the old scale.
+  // Persist scale on zoom changes. Writes ONLY scale — leaves
+  // scrollTop alone in whatever the scroll handler wrote last, so
+  // a fresh mount can't accidentally overwrite the saved position
+  // before the restore effect has a chance to run.
   useEffect(() => {
     if (!docId) return;
-    writePdfState(docId, { scrollTop: lastScrollRef.current, scale });
+    mergePdfState(docId, { scale });
   }, [docId, scale]);
 
   // Expose a seekToPage(n) method so parents can jump from chat citations
