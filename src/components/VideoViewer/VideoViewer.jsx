@@ -72,9 +72,13 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
     return { tokens: tok, words: w, wordIndexMap: map };
   }, [transcript]);
 
-  // DOM refs into the transcript so the rAF tick can toggle the active
-  // class directly — no React render per frame.
+  // DOM refs into the transcript so the rAF tick can mutate the spans
+  // directly — no React render per frame. wordElsRef holds the wrapping
+  // span (for the active class and bounds checks); fillElsRef holds the
+  // sweep-bar inside it that we resize every frame to show progress
+  // through the spoken word.
   const wordElsRef = useRef([]);
+  const fillElsRef = useRef([]);
   const scrollRef = useRef(null);
   const activeIdxRef = useRef(-1);
   const userScrollRef = useRef(false);
@@ -251,22 +255,20 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
 
         // Read the live lead value from a ref so [ and ] take effect
         // on the very next frame, without restarting the rAF loop.
-        const nextIdx = findActiveWordIdx(words, estimatedT + leadMsRef.current / 1000);
+        const cursorT = estimatedT + leadMsRef.current / 1000;
+        const nextIdx = findActiveWordIdx(words, cursorT);
         const prevIdx = activeIdxRef.current;
         if (nextIdx !== prevIdx) {
           if (prevIdx >= 0) {
             const prevEl = wordElsRef.current[prevIdx];
             if (prevEl) prevEl.classList.remove("yt-word-active");
+            const prevFill = fillElsRef.current[prevIdx];
+            if (prevFill) prevFill.style.width = "0%";
           }
           if (nextIdx >= 0) {
             const nextEl = wordElsRef.current[nextIdx];
             if (nextEl) {
               nextEl.classList.add("yt-word-active");
-              // Skip scrollIntoView when the word is already on-screen.
-              // Calling it for in-view elements still forces a sync
-              // layout flush (~1-3ms per call). At 5-10 word changes
-              // per second that adds up and was visibly slowing the
-              // highlight paint. Manual rect compare is ~0.05ms.
               if (!userScrollRef.current && scrollRef.current) {
                 const cont = scrollRef.current;
                 const wRect = nextEl.getBoundingClientRect();
@@ -278,6 +280,23 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
             }
           }
           activeIdxRef.current = nextIdx;
+        }
+        // Sweep the fill bar across the active word every frame. This
+        // is the key trick: even if our per-word START time is slightly
+        // off, the bar's continuous motion at 60Hz reads as locked to
+        // the audio because the eye tracks the motion, not the word
+        // boundaries. width mutation only triggers paint, not layout
+        // (the fill is absolute-positioned so it doesn't resize the
+        // word's text).
+        if (nextIdx >= 0) {
+          const fill = fillElsRef.current[nextIdx];
+          if (fill) {
+            const w = words[nextIdx];
+            const wStart = w.start;
+            const wEnd = w.end > wStart ? w.end : wStart + 0.18;
+            const progress = Math.max(0, Math.min(1, (cursorT - wStart) / (wEnd - wStart)));
+            fill.style.width = `${(progress * 100).toFixed(1)}%`;
+          }
         }
         // Throttle the parent re-render that the progress callback
         // triggers — we don't need 60Hz updates on the scroll stripe.
@@ -341,6 +360,7 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
           tokens={tokens}
           wordIndexMap={wordIndexMap}
           wordElsRef={wordElsRef}
+          fillElsRef={fillElsRef}
           scrollRef={scrollRef}
           onScroll={handleScroll}
           onSeek={handleSeek}
@@ -391,7 +411,8 @@ function tokenizeTranscript(transcript) {
       if (!part) continue;
       if (/\S/.test(part)) {
         const start = segOffset + (consumedChars / totalChars) * segDuration;
-        tokens.push({ type: "word", text: part, start });
+        const end = segOffset + ((consumedChars + part.length) / totalChars) * segDuration;
+        tokens.push({ type: "word", text: part, start, end });
         consumedChars += part.length;
       } else {
         tokens.push({ type: "space", text: part });
@@ -424,7 +445,7 @@ function findActiveWordIdx(words, time) {
 // was the source of the lag-then-skip pattern when the audio outran
 // the parent's render cycle.
 const ParagraphTranscript = memo(function ParagraphTranscript({
-  T, tokens, wordIndexMap, wordElsRef, scrollRef, onScroll, onSeek,
+  T, tokens, wordIndexMap, wordElsRef, fillElsRef, scrollRef, onScroll, onSeek,
 }) {
   if (!tokens.length) {
     return (
@@ -456,19 +477,32 @@ const ParagraphTranscript = memo(function ParagraphTranscript({
         "--yt-word-active-bg": `${T.easy}66`,
       }}
     >
-      {/* Scoped styles for the read-along highlight. Inlined here so
-          the rule lives with the only component that uses it.
-          DO NOT change font-weight or any other layout-triggering
-          property on .yt-word-active — that forces a reflow of the
-          entire paragraph (10-30ms for a 1500-word transcript) on
-          EVERY word change, which is exactly what made the highlight
-          feel laggy. Color and background are paint-only and basically
-          free; we lean on a stronger background tint to make the
-          highlight clearly visible without touching layout. */}
+      {/* Scoped styles. The .yt-word-fill is the sweep bar that the
+          rAF loop animates across the currently-spoken word. It's
+          absolute-positioned so resizing it only repaints — no reflow,
+          no font-weight change, no layout cost. The text sits on top
+          via z-index, so the bar reads as a karaoke wipe behind it. */}
       <style>{`
-        #video-transcript-pane .yt-word.yt-word-active {
-          color: var(--yt-word-active-color);
+        #video-transcript-pane .yt-word {
+          position: relative;
+          display: inline-block;
+          cursor: pointer;
+          border-radius: 3px;
+        }
+        #video-transcript-pane .yt-word-fill {
+          position: absolute;
+          left: 0; top: 0; bottom: 0;
+          width: 0%;
           background: var(--yt-word-active-bg);
+          border-radius: 3px;
+          pointer-events: none;
+        }
+        #video-transcript-pane .yt-word-text {
+          position: relative;
+          z-index: 1;
+        }
+        #video-transcript-pane .yt-word.yt-word-active .yt-word-text {
+          color: var(--yt-word-active-color);
         }
       `}</style>
       <p style={{ margin: 0 }}>
@@ -482,12 +516,14 @@ const ParagraphTranscript = memo(function ParagraphTranscript({
               className="yt-word"
               data-timestamp={t.start}
               onClick={() => onSeek(t.start)}
-              style={{
-                padding: "0 2px",
-                borderRadius: 3,
-                cursor: "pointer",
-              }}
-            >{t.text}</span>
+            >
+              <span
+                ref={el => { fillElsRef.current[wIdx] = el; }}
+                className="yt-word-fill"
+                aria-hidden="true"
+              />
+              <span className="yt-word-text">{t.text}</span>
+            </span>
           );
         })}
       </p>
