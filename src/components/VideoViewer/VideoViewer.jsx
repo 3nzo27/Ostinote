@@ -102,6 +102,9 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
   const activeIdxRef = useRef(-1);
   const userScrollRef = useRef(false);
   const userScrollTimerRef = useRef(0);
+  // Target scrollTop for the teleprompter follow. Set on word change;
+  // the rAF tick eases the actual scrollTop toward it.
+  const targetScrollRef = useRef(null);
 
   // Reset only the active-word marker when the doc / token set changes.
   useEffect(() => {
@@ -215,23 +218,18 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
             const nextEl = wordElsRef.current[nextIdx];
             if (nextEl) {
               nextEl.classList.add("yt-word-active");
-              // Teleprompter scroll: keep the active word anchored at
-              // ~30% from the top of the transcript pane. Every word
-              // change nudges the container's scrollTop by the delta
-              // between where the word currently is and where we want
-              // it. The result is a smooth, continuous follow — the
-              // text feeds itself forward so the highlight never drifts
-              // toward the bottom edge.
+              // Teleprompter target — keep the active word anchored at
+              // ~30% from the top of the pane. We only SET the target
+              // here; the rAF tick eases the actual scrollTop toward
+              // it over multiple frames for a smooth follow.
               if (!userScrollRef.current && scrollRef.current) {
                 const cont = scrollRef.current;
                 const wRect = nextEl.getBoundingClientRect();
                 const cRect = cont.getBoundingClientRect();
                 const targetY = cRect.top + cRect.height * 0.3;
                 const delta = wRect.top - targetY;
-                // Threshold avoids sub-pixel jitter when the word is
-                // already at the anchor line.
-                if (Math.abs(delta) > 4) {
-                  cont.scrollTop += delta;
+                if (Math.abs(delta) > 1) {
+                  targetScrollRef.current = cont.scrollTop + delta;
                 }
               }
             }
@@ -241,6 +239,22 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
         if (onScrollProgress && duration > 0 && now - lastProgressAt >= PROGRESS_THROTTLE_MS) {
           onScrollProgress(Math.min(t / duration, 1));
           lastProgressAt = now;
+        }
+      }
+      // Smooth teleprompter scroll. Each frame we move ~18% of the
+      // remaining distance toward target — eased exponential approach
+      // (Zeno's-style damping). At 60Hz the highlight glides into
+      // place over ~300ms instead of snapping per word, but the loop
+      // self-terminates once we're within a pixel so there's no
+      // perpetual sub-pixel motion.
+      if (targetScrollRef.current != null && !userScrollRef.current && scrollRef.current) {
+        const cont = scrollRef.current;
+        const remaining = targetScrollRef.current - cont.scrollTop;
+        if (Math.abs(remaining) < 0.5) {
+          cont.scrollTop = targetScrollRef.current;
+          targetScrollRef.current = null;
+        } else {
+          cont.scrollTop += remaining * 0.18;
         }
       }
       pollRef.current = requestAnimationFrame(tick);
