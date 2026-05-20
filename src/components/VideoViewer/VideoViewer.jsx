@@ -7,6 +7,21 @@ import useTheme from "../../theme/useTheme.js";
 // player.getCurrentTime() call plus one setState — cheap.
 const AUTO_SCROLL_PAUSE_MS = 3000;
 
+// YouTube's auto-generated transcript timestamps lag actual speech by
+// a few hundred ms (the transcription pipeline marks a segment AFTER
+// the audio for it has started). Audio output buffering adds more.
+// We compensate by computing the active word for currentTime + this
+// offset — effectively asking "what word will the user be hearing in
+// ~LEAD_MS milliseconds?" — so the highlight lights up in step with
+// what they're hearing, not after.
+const HIGHLIGHT_LEAD_MS = 400;
+
+// We don't need to update the workspace's tiny scroll-progress stripe
+// 60 times per second. Throttling it down so the rAF loop doesn't
+// trigger a parent re-render on every single frame frees up the main
+// thread to actually paint the highlight on time.
+const PROGRESS_THROTTLE_MS = 250;
+
 let ytApiLoading = false;
 let ytApiReady = !!window.YT?.Player;
 const ytApiCallbacks = [];
@@ -160,12 +175,17 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
     cancelAnimationFrame(pollRef.current);
     if (!playing) return;
 
+    let lastProgressAt = 0;
+    const leadSec = HIGHLIGHT_LEAD_MS / 1000;
+
     const tick = () => {
       const player = playerRef.current;
       const t = player?.getCurrentTime?.();
       if (t != null) {
-        // Find active word via binary search (stable at any size).
-        const nextIdx = findActiveWordIdx(words, t);
+        // Find active word via binary search on currentTime + lead
+        // offset so the highlight is in step with the user's actual
+        // hearing, not with YT's transcript metadata.
+        const nextIdx = findActiveWordIdx(words, t + leadSec);
         const prevIdx = activeIdxRef.current;
         if (nextIdx !== prevIdx) {
           if (prevIdx >= 0) {
@@ -176,10 +196,10 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
             const nextEl = wordElsRef.current[nextIdx];
             if (nextEl) {
               nextEl.classList.add("yt-word-active");
-              // Scroll-in-view only on word change (not every frame), and
-              // only when the user isn't actively scrolling themselves.
-              // behavior:"auto" so smooth-scroll never queues up multiple
-              // animations behind one another.
+              // Scroll-in-view only on word change (not every frame),
+              // and only when the user isn't actively scrolling
+              // themselves. behavior:"auto" so smooth-scroll never
+              // queues up multiple animations behind one another.
               if (!userScrollRef.current) {
                 nextEl.scrollIntoView({ behavior: "auto", block: "nearest" });
               }
@@ -187,8 +207,13 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
           }
           activeIdxRef.current = nextIdx;
         }
-        if (onScrollProgress && duration > 0) {
+        // Throttle the progress callback — it triggers a parent React
+        // re-render which we don't want competing with the highlight
+        // paint every frame.
+        const now = performance.now();
+        if (onScrollProgress && duration > 0 && now - lastProgressAt >= PROGRESS_THROTTLE_MS) {
           onScrollProgress(Math.min(t / duration, 1));
+          lastProgressAt = now;
         }
       }
       pollRef.current = requestAnimationFrame(tick);
