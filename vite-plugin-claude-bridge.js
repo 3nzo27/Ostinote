@@ -80,12 +80,12 @@ function readBody(req) {
   });
 }
 
-// Fetches YouTube's auto-generated caption track in json3 format, which
-// includes per-word timing. Returns a flat list of { text, start } with
-// start in seconds. Mirrors electron/main.cjs fetchYouTubeWordTimings.
+// Fetches YouTube's auto-generated caption track with per-word
+// timing. Tries json3 first, falls back to srv3 (the XML format YT's
+// own player consumes), then to srv3-by-default (no fmt param). Both
+// encode per-word timing; some videos / tracks support one or the
+// other depending on age + provenance. Mirrors electron/main.cjs.
 async function fetchYouTubeWordTimings(videoId) {
-  // A real desktop browser UA so YouTube doesn't redirect us to a
-  // consent-wall page (which is HTML and trips JSON.parse downstream).
   const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
   const pageRes = await fetch(`https://www.youtube.com/watch?v=${videoId}&hl=en`, {
     headers: { "User-Agent": UA, "Accept-Language": "en-US,en;q=0.9" },
@@ -97,27 +97,93 @@ async function fetchYouTubeWordTimings(videoId) {
   const track = tracks.find(t => (t.languageCode || "").startsWith("en"))
              || tracks.find(t => (t.vssId || "").startsWith(".en"))
              || tracks[0];
-  const baseUrl = String(track.baseUrl || "").replace(/\\u0026/g, "&");
-  if (!baseUrl) throw new Error("Caption track has no URL");
-  const capRes = await fetch(`${baseUrl}&fmt=json3`, { headers: { "User-Agent": UA } });
-  if (!capRes.ok) throw new Error(`Caption fetch returned ${capRes.status}`);
-  const body = await capRes.text();
-  if (!body.trim()) throw new Error("Caption response was empty");
-  let json3;
-  try { json3 = JSON.parse(body); }
-  catch { throw new Error("Caption response wasn't valid JSON"); }
+  const rawBase = String(track.baseUrl || "").replace(/\\u0026/g, "&");
+  if (!rawBase) throw new Error("Caption track has no URL");
+
+  const captionHeaders = {
+    "User-Agent": UA,
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": `https://www.youtube.com/watch?v=${videoId}`,
+    "Origin": "https://www.youtube.com",
+  };
+  const withFmt = (fmt) => {
+    const u = new URL(rawBase);
+    u.searchParams.set("fmt", fmt);
+    return u.toString();
+  };
+
+  let words = await tryJson3(withFmt("json3"), captionHeaders);
+  if (!words.length) words = await trySrv3(withFmt("srv3"), captionHeaders);
+  if (!words.length) words = await trySrv3(rawBase, captionHeaders);
+  if (!words.length) throw new Error("Caption track had no usable timing data");
+  return words;
+}
+
+async function tryJson3(url, headers) {
+  try {
+    const res = await fetch(url, { headers });
+    if (!res.ok) return [];
+    const body = await res.text();
+    if (!body.trim()) return [];
+    const json3 = JSON.parse(body);
+    const words = [];
+    for (const event of json3.events || []) {
+      if (!event.segs) continue;
+      const tStart = event.tStartMs || 0;
+      for (const seg of event.segs) {
+        const text = seg.utf8;
+        if (!text || !/\S/.test(text)) continue;
+        words.push({ text, start: (tStart + (seg.tOffsetMs || 0)) / 1000 });
+      }
+    }
+    return words;
+  } catch { return []; }
+}
+
+async function trySrv3(url, headers) {
+  try {
+    const res = await fetch(url, { headers });
+    if (!res.ok) return [];
+    const body = await res.text();
+    if (!body.trim()) return [];
+    return parseSrv3(body);
+  } catch { return []; }
+}
+
+function parseSrv3(xml) {
   const words = [];
-  for (const event of json3.events || []) {
-    if (!event.segs) continue;
-    const tStart = event.tStartMs || 0;
-    for (const seg of event.segs) {
-      const text = seg.utf8;
-      if (!text || !/\S/.test(text)) continue;
-      words.push({ text, start: (tStart + (seg.tOffsetMs || 0)) / 1000 });
+  const paragraphs = xml.match(/<p\b[^>]*>[\s\S]*?<\/p>/g) || [];
+  for (const p of paragraphs) {
+    const attrs = (p.match(/<p\b([^>]*)>/) || [, ""])[1];
+    const pStartMs = parseInt((attrs.match(/\bt="(\d+)"/) || [, "0"])[1], 10) || 0;
+    const inner = (p.match(/<p\b[^>]*>([\s\S]*?)<\/p>/) || [, ""])[1];
+    const segMatches = [...inner.matchAll(/<s\b([^>]*)>([\s\S]*?)<\/s>/g)];
+    if (segMatches.length === 0) {
+      const text = decodeXmlEntities(inner).trim();
+      if (text) words.push({ text, start: pStartMs / 1000 });
+      continue;
+    }
+    for (const m of segMatches) {
+      const segAttrs = m[1] || "";
+      const segText = decodeXmlEntities(m[2]);
+      if (!segText || !/\S/.test(segText)) continue;
+      const offsetMs = parseInt((segAttrs.match(/\bt="(\d+)"/) || [, "0"])[1], 10) || 0;
+      words.push({ text: segText, start: (pStartMs + offsetMs) / 1000 });
     }
   }
-  if (!words.length) throw new Error("Caption track was empty");
   return words;
+}
+
+function decodeXmlEntities(s) {
+  return String(s)
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => { try { return String.fromCodePoint(parseInt(hex, 16)); } catch { return ""; } })
+    .replace(/&#(\d+);/g, (_, dec) => { try { return String.fromCodePoint(parseInt(dec, 10)); } catch { return ""; } });
 }
 
 // Pull "captionTracks":[ ... ] out of YT watch-page HTML safely. Walks

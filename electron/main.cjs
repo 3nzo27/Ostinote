@@ -283,27 +283,102 @@ async function _fetchYouTubeWordTimings(videoId) {
   const track = tracks.find(t => (t.languageCode || "").startsWith("en"))
              || tracks.find(t => (t.vssId || "").startsWith(".en"))
              || tracks[0];
-  const baseUrl = String(track.baseUrl || "").replace(/\\u0026/g, "&");
-  if (!baseUrl) throw new Error("Caption track has no URL");
-  const capRes = await fetch(`${baseUrl}&fmt=json3`, { headers: { "User-Agent": UA } });
-  if (!capRes.ok) throw new Error(`Caption fetch returned ${capRes.status}`);
-  const body = await capRes.text();
-  if (!body.trim()) throw new Error("Caption response was empty");
-  let json3;
-  try { json3 = JSON.parse(body); }
-  catch { throw new Error("Caption response wasn't valid JSON"); }
+  const rawBase = String(track.baseUrl || "").replace(/\\u0026/g, "&");
+  if (!rawBase) throw new Error("Caption track has no URL");
+
+  // Try json3 first (newer + smaller), then srv3 (XML, what the YT
+  // player itself uses). Both encode per-word timing. Different videos
+  // / track types support one or the other, so we fall through.
+  const captionHeaders = {
+    "User-Agent": UA,
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": `https://www.youtube.com/watch?v=${videoId}`,
+    "Origin": "https://www.youtube.com",
+  };
+  const withFmt = (fmt) => {
+    const u = new URL(rawBase);
+    u.searchParams.set("fmt", fmt);
+    return u.toString();
+  };
+
+  let words = await _tryJson3(withFmt("json3"), captionHeaders);
+  if (!words.length) words = await _trySrv3(withFmt("srv3"), captionHeaders);
+  if (!words.length) words = await _trySrv3(rawBase, captionHeaders); // no fmt = srv3 default
+  if (!words.length) throw new Error("Caption track had no usable timing data");
+  return words;
+}
+
+async function _tryJson3(url, headers) {
+  try {
+    const res = await fetch(url, { headers });
+    if (!res.ok) return [];
+    const body = await res.text();
+    if (!body.trim()) return [];
+    const json3 = JSON.parse(body);
+    const words = [];
+    for (const event of json3.events || []) {
+      if (!event.segs) continue;
+      const tStart = event.tStartMs || 0;
+      for (const seg of event.segs) {
+        const text = seg.utf8;
+        if (!text || !/\S/.test(text)) continue;
+        words.push({ text, start: (tStart + (seg.tOffsetMs || 0)) / 1000 });
+      }
+    }
+    return words;
+  } catch { return []; }
+}
+
+async function _trySrv3(url, headers) {
+  try {
+    const res = await fetch(url, { headers });
+    if (!res.ok) return [];
+    const body = await res.text();
+    if (!body.trim()) return [];
+    return _parseSrv3(body);
+  } catch { return []; }
+}
+
+// srv3 is the XML format YT's own player consumes — same per-word
+// timing as json3, just different shape. <p t="..." d="..."> wraps a
+// paragraph; nested <s t="..."> elements are per-word (or per-segment)
+// offsets in ms relative to the parent's t.
+function _parseSrv3(xml) {
   const words = [];
-  for (const event of json3.events || []) {
-    if (!event.segs) continue;
-    const tStart = event.tStartMs || 0;
-    for (const seg of event.segs) {
-      const text = seg.utf8;
-      if (!text || !/\S/.test(text)) continue;
-      words.push({ text, start: (tStart + (seg.tOffsetMs || 0)) / 1000 });
+  const paragraphs = xml.match(/<p\b[^>]*>[\s\S]*?<\/p>/g) || [];
+  for (const p of paragraphs) {
+    const attrs = (p.match(/<p\b([^>]*)>/) || [, ""])[1];
+    const pStartMs = parseInt((attrs.match(/\bt="(\d+)"/) || [, "0"])[1], 10) || 0;
+    const inner = (p.match(/<p\b[^>]*>([\s\S]*?)<\/p>/) || [, ""])[1];
+    const segMatches = [...inner.matchAll(/<s\b([^>]*)>([\s\S]*?)<\/s>/g)];
+    if (segMatches.length === 0) {
+      // Some <p>s have no <s> children — the inner text is the only
+      // content. Use the paragraph's own start time.
+      const text = _decodeXmlEntities(inner).trim();
+      if (text) words.push({ text, start: pStartMs / 1000 });
+      continue;
+    }
+    for (const m of segMatches) {
+      const segAttrs = m[1] || "";
+      const segText = _decodeXmlEntities(m[2]);
+      if (!segText || !/\S/.test(segText)) continue;
+      const offsetMs = parseInt((segAttrs.match(/\bt="(\d+)"/) || [, "0"])[1], 10) || 0;
+      words.push({ text: segText, start: (pStartMs + offsetMs) / 1000 });
     }
   }
-  if (!words.length) throw new Error("Caption track was empty");
   return words;
+}
+
+function _decodeXmlEntities(s) {
+  return String(s)
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => { try { return String.fromCodePoint(parseInt(hex, 16)); } catch { return ""; } })
+    .replace(/&#(\d+);/g, (_, dec) => { try { return String.fromCodePoint(parseInt(dec, 10)); } catch { return ""; } });
 }
 
 // Pull "captionTracks":[ ... ] out of a YouTube watch-page HTML safely.
