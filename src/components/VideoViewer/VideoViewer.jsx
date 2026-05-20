@@ -43,9 +43,12 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
   const [playerReady, setPlayerReady] = useState(false);
   const pollRef = useRef(0);
 
-  // Word-level timing comes from YouTube's json3 caption data
-  // (perfect timing). New docs already have it on doc.wordTimings; for
-  // pre-existing docs that don't, lazy-fetch on mount and persist.
+  // Word-level timing comes from YouTube's json3 / srv3 caption data
+  // (perfect timing) when available. For pre-existing docs we
+  // lazy-fetch on mount and persist. If YT only has segment-level
+  // captions (manually-uploaded videos sometimes do), we fall back to
+  // the segment transcript and highlight at segment granularity —
+  // still timing-accurate, just less granular.
   const [wordTimings, setWordTimings] = useState(doc?.wordTimings || null);
   const [wordTimingsError, setWordTimingsError] = useState(null);
   useEffect(() => {
@@ -57,14 +60,30 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
     let cancelled = false;
     fetchWordTimings(doc.videoId)
       .then(words => {
-        if (cancelled || !words?.length) return;
+        if (cancelled) return;
+        if (!words?.length) throw new Error("No timing data");
         setWordTimings(words);
-        // Cache to the doc so we don't re-fetch next time.
         updateDocument(doc.id, { wordTimings: words }).catch(() => {});
       })
-      .catch(err => { if (!cancelled) setWordTimingsError(err.message || "Failed to load captions"); });
+      .catch(() => {
+        if (cancelled) return;
+        // Fallback: derive timings from the segment-level transcript
+        // we already saved when adding the video. Each segment becomes
+        // one entry — the whole segment text highlights when the audio
+        // hits its start. Imperfect granularity, but real timing.
+        const segs = doc?.transcript || [];
+        if (segs.length) {
+          const fallback = segs.map(s => ({
+            text: s.text,
+            start: s.offset ?? s.start ?? 0,
+          }));
+          setWordTimings(fallback);
+        } else {
+          setWordTimingsError("No captions available for this video");
+        }
+      });
     return () => { cancelled = true; };
-  }, [wordTimings, doc?.id, doc?.videoId]);
+  }, [wordTimings, doc?.id, doc?.videoId, doc?.transcript]);
 
   const { tokens, words, wordIndexMap } = useMemo(() => {
     const tok = buildTokens(wordTimings);

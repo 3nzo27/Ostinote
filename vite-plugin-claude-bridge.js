@@ -115,8 +115,29 @@ async function fetchYouTubeWordTimings(videoId) {
   let words = await tryJson3(withFmt("json3"), captionHeaders);
   if (!words.length) words = await trySrv3(withFmt("srv3"), captionHeaders);
   if (!words.length) words = await trySrv3(rawBase, captionHeaders);
+  if (!words.length) words = await trySrv1(withFmt("srv1"), captionHeaders);
   if (!words.length) throw new Error("Caption track had no usable timing data");
   return words;
+}
+
+async function trySrv1(url, headers) {
+  try {
+    const res = await fetch(url, { headers });
+    if (!res.ok) return [];
+    const body = await res.text();
+    if (!body.trim()) return [];
+    const out = [];
+    const matches = [...body.matchAll(/<text\b([^>]*)>([\s\S]*?)<\/text>/g)];
+    for (const m of matches) {
+      const attrs = m[1] || "";
+      const text = decodeXmlEntities(m[2]).trim();
+      if (!text) continue;
+      const startStr = (attrs.match(/\bstart="([\d.]+)"/) || [, ""])[1];
+      const start = startStr ? parseFloat(startStr) : 0;
+      out.push({ text, start });
+    }
+    return out;
+  } catch { return []; }
 }
 
 async function tryJson3(url, headers) {

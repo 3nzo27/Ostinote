@@ -304,8 +304,31 @@ async function _fetchYouTubeWordTimings(videoId) {
   let words = await _tryJson3(withFmt("json3"), captionHeaders);
   if (!words.length) words = await _trySrv3(withFmt("srv3"), captionHeaders);
   if (!words.length) words = await _trySrv3(rawBase, captionHeaders); // no fmt = srv3 default
+  // srv1 is segment-level only (<text start="..">). Use as last resort
+  // so callers at least get SOME timing data they can highlight against.
+  if (!words.length) words = await _trySrv1(withFmt("srv1"), captionHeaders);
   if (!words.length) throw new Error("Caption track had no usable timing data");
   return words;
+}
+
+async function _trySrv1(url, headers) {
+  try {
+    const res = await fetch(url, { headers });
+    if (!res.ok) return [];
+    const body = await res.text();
+    if (!body.trim()) return [];
+    const out = [];
+    const matches = [...body.matchAll(/<text\b([^>]*)>([\s\S]*?)<\/text>/g)];
+    for (const m of matches) {
+      const attrs = m[1] || "";
+      const text = _decodeXmlEntities(m[2]).trim();
+      if (!text) continue;
+      const startStr = (attrs.match(/\bstart="([\d.]+)"/) || [, ""])[1];
+      const start = startStr ? parseFloat(startStr) : 0;
+      out.push({ text, start });
+    }
+    return out;
+  } catch { return []; }
 }
 
 async function _tryJson3(url, headers) {
