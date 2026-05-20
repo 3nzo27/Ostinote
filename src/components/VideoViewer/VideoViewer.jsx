@@ -1,6 +1,5 @@
-import { useState, useEffect, useRef, useCallback, useImperativeHandle, forwardRef, memo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback, useImperativeHandle, forwardRef, memo } from "react";
 import useTheme from "../../theme/useTheme.js";
-import { formatTimestamp } from "../../utils/youtubeTranscript.js";
 
 const POLL_MS = 250;
 const AUTO_SCROLL_PAUSE_MS = 3000;
