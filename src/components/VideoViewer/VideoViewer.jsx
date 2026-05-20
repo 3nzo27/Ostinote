@@ -7,19 +7,17 @@ import useTheme from "../../theme/useTheme.js";
 // player.getCurrentTime() call plus one setState — cheap.
 const AUTO_SCROLL_PAUSE_MS = 3000;
 
-// YouTube's auto-generated transcript timestamps lag actual speech by
-// a few hundred ms (the transcription pipeline marks a segment AFTER
-// the audio for it has started). Audio output buffering adds more.
-// We compensate by computing the active word for currentTime + this
-// offset — effectively asking "what word will the user be hearing in
-// ~LEAD_MS milliseconds?" — so the highlight lights up in step with
-// what they're hearing, not after.
-//
-// 600ms is on the aggressive side but matches typical observed YT
-// transcript drift (~300-400ms) plus audio output latency (~100-200ms).
-// If the highlight ever feels EARLY, drop to 400. If it still lags,
-// push to 800.
-const HIGHLIGHT_LEAD_MS = 600;
+// Default highlight lead in ms — how much earlier than YT's reported
+// time we mark a word as active, to compensate for the stacking
+// latencies of (a) auto-transcript stamps being late, (b) audio output
+// buffering, and (c) browser-specific playback delay. The exact right
+// value varies per video and per device, so we ship a sensible default
+// and let the user nudge it live with [ and ] (saved per doc).
+const HIGHLIGHT_LEAD_MS_DEFAULT = 800;
+const HIGHLIGHT_LEAD_STEP_MS = 100;
+const HIGHLIGHT_LEAD_MIN_MS = -500;
+const HIGHLIGHT_LEAD_MAX_MS = 2500;
+const LEAD_STORAGE_PREFIX = "ostinote_video_lead_";
 
 // We don't need to update the workspace's tiny scroll-progress stripe
 // 60 times per second. Throttling it down so the rAF loop doesn't
@@ -91,6 +89,42 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
   useEffect(() => {
     activeIdxRef.current = -1;
   }, [words]);
+
+  // Per-doc karaoke sync calibration. The exact lead needed varies a
+  // lot by video + device, so we let the user nudge it live with [ and ]
+  // and persist the value per doc id. The rAF tick reads from a ref so
+  // we don't have to tear down and rebuild the loop on every change.
+  const [leadMs, setLeadMs] = useState(() => {
+    if (!doc?.id) return HIGHLIGHT_LEAD_MS_DEFAULT;
+    try {
+      const v = parseInt(localStorage.getItem(LEAD_STORAGE_PREFIX + doc.id) || "", 10);
+      return Number.isFinite(v) ? v : HIGHLIGHT_LEAD_MS_DEFAULT;
+    } catch { return HIGHLIGHT_LEAD_MS_DEFAULT; }
+  });
+  const leadMsRef = useRef(leadMs);
+  useEffect(() => { leadMsRef.current = leadMs; }, [leadMs]);
+  const [calibrationHint, setCalibrationHint] = useState(0); // bumps to refresh the visible chip
+  const calibrationHintTimer = useRef(0);
+  useEffect(() => {
+    if (!doc?.id) return;
+    try { localStorage.setItem(LEAD_STORAGE_PREFIX + doc.id, String(leadMs)); } catch {}
+  }, [leadMs, doc?.id]);
+  useEffect(() => {
+    if (!playerReady) return;
+    const onKey = (e) => {
+      // Don't steal keystrokes from inputs / textareas / contenteditable.
+      const tag = (e.target?.tagName || "").toUpperCase();
+      if (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable) return;
+      if (e.key !== "[" && e.key !== "]") return;
+      const delta = e.key === "[" ? -HIGHLIGHT_LEAD_STEP_MS : HIGHLIGHT_LEAD_STEP_MS;
+      setLeadMs(prev => Math.max(HIGHLIGHT_LEAD_MIN_MS, Math.min(HIGHLIGHT_LEAD_MAX_MS, prev + delta)));
+      setCalibrationHint(c => c + 1);
+      clearTimeout(calibrationHintTimer.current);
+      calibrationHintTimer.current = setTimeout(() => setCalibrationHint(0), 1400);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [playerReady]);
 
   useImperativeHandle(ref, () => ({
     seekTo(seconds) {
@@ -194,7 +228,6 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
     let syncMediaT = null;   // YT's currentTime at the last real update
     let syncWallT = null;    // performance.now() at that moment
     let prevReportedT = null;
-    const leadSec = HIGHLIGHT_LEAD_MS / 1000;
 
     const tick = () => {
       const player = playerRef.current;
@@ -216,7 +249,9 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
 
         const estimatedT = syncMediaT + ((now - syncWallT) / 1000) * (player.getPlaybackRate?.() || 1);
 
-        const nextIdx = findActiveWordIdx(words, estimatedT + leadSec);
+        // Read the live lead value from a ref so [ and ] take effect
+        // on the very next frame, without restarting the rAF loop.
+        const nextIdx = findActiveWordIdx(words, estimatedT + leadMsRef.current / 1000);
         const prevIdx = activeIdxRef.current;
         if (nextIdx !== prevIdx) {
           if (prevIdx >= 0) {
@@ -227,8 +262,18 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
             const nextEl = wordElsRef.current[nextIdx];
             if (nextEl) {
               nextEl.classList.add("yt-word-active");
-              if (!userScrollRef.current) {
-                nextEl.scrollIntoView({ behavior: "auto", block: "nearest" });
+              // Skip scrollIntoView when the word is already on-screen.
+              // Calling it for in-view elements still forces a sync
+              // layout flush (~1-3ms per call). At 5-10 word changes
+              // per second that adds up and was visibly slowing the
+              // highlight paint. Manual rect compare is ~0.05ms.
+              if (!userScrollRef.current && scrollRef.current) {
+                const cont = scrollRef.current;
+                const wRect = nextEl.getBoundingClientRect();
+                const cRect = cont.getBoundingClientRect();
+                if (wRect.top < cRect.top || wRect.bottom > cRect.bottom) {
+                  nextEl.scrollIntoView({ behavior: "auto", block: "nearest" });
+                }
               }
             }
           }
@@ -290,15 +335,32 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
         }} />
       </div>
 
-      <ParagraphTranscript
-        T={T}
-        tokens={tokens}
-        wordIndexMap={wordIndexMap}
-        wordElsRef={wordElsRef}
-        scrollRef={scrollRef}
-        onScroll={handleScroll}
-        onSeek={handleSeek}
-      />
+      <div style={{ flex: 1, minHeight: 0, position: "relative", display: "flex", flexDirection: "column" }}>
+        <ParagraphTranscript
+          T={T}
+          tokens={tokens}
+          wordIndexMap={wordIndexMap}
+          wordElsRef={wordElsRef}
+          scrollRef={scrollRef}
+          onScroll={handleScroll}
+          onSeek={handleSeek}
+        />
+        {/* Calibration chip — appears briefly each time you press
+            [ or ] to tune the karaoke offset. The current lead is
+            persisted per doc so you only need to dial it in once. */}
+        {calibrationHint > 0 && (
+          <div style={{
+            position: "absolute", top: 8, right: 12,
+            padding: "5px 10px", borderRadius: 999,
+            background: T.text, color: T.card,
+            fontSize: 11, fontWeight: 600, fontFamily: T.fontBody,
+            boxShadow: T.shadow2 || "0 2px 8px rgba(0,0,0,0.18)",
+            pointerEvents: "none",
+          }}>
+            Sync {leadMs >= 0 ? "+" : ""}{leadMs}ms  &nbsp;&middot;&nbsp;  [ / ] to adjust
+          </div>
+        )}
+      </div>
     </div>
   );
 });
