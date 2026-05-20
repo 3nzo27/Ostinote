@@ -62,9 +62,13 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
   const userScrollRef = useRef(false);
   const userScrollTimerRef = useRef(0);
 
-  // Reset DOM-ref state when the doc / token set changes.
+  // Reset only the active-word marker when the doc / token set changes.
+  // We must NOT clear wordElsRef here — the callback refs on each word
+  // span have already populated it during mount, so wiping it here would
+  // immediately erase every reference and the rAF tick would never find
+  // a span to highlight. React handles per-element cleanup automatically
+  // (old refs are called with null when spans unmount).
   useEffect(() => {
-    wordElsRef.current = new Array(words.length).fill(null);
     activeIdxRef.current = -1;
   }, [words]);
 
