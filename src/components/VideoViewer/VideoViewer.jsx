@@ -102,6 +102,9 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
   const activeIdxRef = useRef(-1);
   const userScrollRef = useRef(false);
   const userScrollTimerRef = useRef(0);
+  // Target scrollTop for the line-step follow. Set when the highlight
+  // crosses to a new line; the rAF tick eases toward it quickly.
+  const targetScrollRef = useRef(null);
   // The scrollTop value WE last wrote programmatically. The scroll
   // handler compares against it to tell our own auto-scroll apart from
   // a real user scroll — without this, every eased frame fires a
@@ -223,12 +226,12 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
               nextEl.classList.add("yt-word-active");
               // Line-at-a-time follow: keep the active word's line
               // anchored ~30% down the pane. While reading across a
-              // single line the word stays put (delta ≈ 0, no scroll);
+              // single line the word stays put (delta ≈ 0, no target);
               // the moment the highlight crosses onto a new line the
-              // word drifts a full line below the anchor and we snap
-              // the scroll by exactly that delta. The snap is instant
-              // (no easing) so the text steps line by line rather than
-              // gliding continuously.
+              // word drifts a full line below the anchor and we set a
+              // scroll target one line down. The rAF tick eases toward
+              // it FAST (see below) so the text jumps line to line
+              // with a quick glide rather than a continuous creep.
               if (!userScrollRef.current && scrollRef.current) {
                 const cont = scrollRef.current;
                 const wRect = nextEl.getBoundingClientRect();
@@ -239,8 +242,7 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
                 // Only act once the word has drifted at least half a
                 // line off the anchor — i.e. it changed lines.
                 if (Math.abs(delta) > lineH * 0.5) {
-                  cont.scrollTop += delta;
-                  lastAutoScrollTopRef.current = cont.scrollTop;
+                  targetScrollRef.current = cont.scrollTop + delta;
                 }
               }
             }
@@ -251,6 +253,22 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
           onScrollProgress(Math.min(t / duration, 1));
           lastProgressAt = now;
         }
+      }
+      // Quick line-step glide. Each frame we close ~40% of the
+      // remaining distance to the target — fast enough that a one-line
+      // jump finishes in ~120ms (a snappy slide, not a creep), but
+      // still animated so the eye can track the motion. Self-terminates
+      // within a pixel of target.
+      if (targetScrollRef.current != null && !userScrollRef.current && scrollRef.current) {
+        const cont = scrollRef.current;
+        const remaining = targetScrollRef.current - cont.scrollTop;
+        if (Math.abs(remaining) < 0.5) {
+          cont.scrollTop = targetScrollRef.current;
+          targetScrollRef.current = null;
+        } else {
+          cont.scrollTop += remaining * 0.4;
+        }
+        lastAutoScrollTopRef.current = cont.scrollTop;
       }
       pollRef.current = requestAnimationFrame(tick);
     };
@@ -265,6 +283,7 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
     // a mismatch means the user actually grabbed the scrollbar.
     if (cont && Math.abs(cont.scrollTop - lastAutoScrollTopRef.current) < 2) return;
     userScrollRef.current = true;
+    targetScrollRef.current = null; // abandon any pending line glide
     clearTimeout(userScrollTimerRef.current);
     userScrollTimerRef.current = setTimeout(() => { userScrollRef.current = false; }, AUTO_SCROLL_PAUSE_MS);
   }, []);
