@@ -14,7 +14,12 @@ const AUTO_SCROLL_PAUSE_MS = 3000;
 // offset — effectively asking "what word will the user be hearing in
 // ~LEAD_MS milliseconds?" — so the highlight lights up in step with
 // what they're hearing, not after.
-const HIGHLIGHT_LEAD_MS = 400;
+//
+// 600ms is on the aggressive side but matches typical observed YT
+// transcript drift (~300-400ms) plus audio output latency (~100-200ms).
+// If the highlight ever feels EARLY, drop to 400. If it still lags,
+// push to 800.
+const HIGHLIGHT_LEAD_MS = 600;
 
 // We don't need to update the workspace's tiny scroll-progress stripe
 // 60 times per second. Throttling it down so the rAF loop doesn't
