@@ -84,19 +84,28 @@ function readBody(req) {
 // includes per-word timing. Returns a flat list of { text, start } with
 // start in seconds. Mirrors electron/main.cjs fetchYouTubeWordTimings.
 async function fetchYouTubeWordTimings(videoId) {
-  const html = await (await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
-    headers: { "User-Agent": "Mozilla/5.0" },
-  })).text();
-  const match = html.match(/"captionTracks":(\[.+?\])/);
-  if (!match) throw new Error("No caption tracks on this video");
-  const tracks = JSON.parse(match[1]);
-  if (!tracks.length) throw new Error("No caption tracks on this video");
+  // A real desktop browser UA so YouTube doesn't redirect us to a
+  // consent-wall page (which is HTML and trips JSON.parse downstream).
+  const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
+  const pageRes = await fetch(`https://www.youtube.com/watch?v=${videoId}&hl=en`, {
+    headers: { "User-Agent": UA, "Accept-Language": "en-US,en;q=0.9" },
+  });
+  if (!pageRes.ok) throw new Error(`Video page returned ${pageRes.status}`);
+  const html = await pageRes.text();
+  const tracks = extractCaptionTracks(html);
+  if (!tracks.length) throw new Error("No captions on this video");
   const track = tracks.find(t => (t.languageCode || "").startsWith("en"))
              || tracks.find(t => (t.vssId || "").startsWith(".en"))
              || tracks[0];
   const baseUrl = String(track.baseUrl || "").replace(/\\u0026/g, "&");
   if (!baseUrl) throw new Error("Caption track has no URL");
-  const json3 = await (await fetch(`${baseUrl}&fmt=json3`)).json();
+  const capRes = await fetch(`${baseUrl}&fmt=json3`, { headers: { "User-Agent": UA } });
+  if (!capRes.ok) throw new Error(`Caption fetch returned ${capRes.status}`);
+  const body = await capRes.text();
+  if (!body.trim()) throw new Error("Caption response was empty");
+  let json3;
+  try { json3 = JSON.parse(body); }
+  catch { throw new Error("Caption response wasn't valid JSON"); }
   const words = [];
   for (const event of json3.events || []) {
     if (!event.segs) continue;
@@ -109,6 +118,33 @@ async function fetchYouTubeWordTimings(videoId) {
   }
   if (!words.length) throw new Error("Caption track was empty");
   return words;
+}
+
+// Pull "captionTracks":[ ... ] out of YT watch-page HTML safely. Walks
+// the string and balances brackets so caption-track fields containing
+// a `]` (e.g. authored track names) don't truncate the match.
+function extractCaptionTracks(html) {
+  const marker = '"captionTracks":';
+  const idx = html.indexOf(marker);
+  if (idx === -1) throw new Error("No captionTracks found in video page");
+  const arrStart = html.indexOf("[", idx);
+  if (arrStart === -1) throw new Error("captionTracks marker not followed by array");
+  let depth = 0, inString = false, escape = false, end = -1;
+  for (let i = arrStart; i < html.length; i++) {
+    const c = html[i];
+    if (escape) { escape = false; continue; }
+    if (c === "\\") { escape = true; continue; }
+    if (c === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (c === "[") depth++;
+    else if (c === "]") { depth--; if (depth === 0) { end = i; break; } }
+  }
+  if (end === -1) throw new Error("captionTracks array is unterminated");
+  try {
+    return JSON.parse(html.substring(arrStart, end + 1));
+  } catch (e) {
+    throw new Error(`Could not parse captionTracks JSON: ${e.message}`);
+  }
 }
 
 export default function claudeBridge() {
