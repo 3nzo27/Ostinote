@@ -34,13 +34,39 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
   const { T } = useTheme();
   const playerRef = useRef(null);
   const containerRef = useRef(null);
-  const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
   const pollRef = useRef(0);
 
   const transcript = doc?.transcript || [];
+
+  // Tokenize the transcript here (not inside the child) so the rAF
+  // callback has direct access to `words` without a closure over the
+  // child's state. The child only renders once per transcript change.
+  const { tokens, words, wordIndexMap } = useMemo(() => {
+    const tok = tokenizeTranscript(transcript);
+    const w = [];
+    const map = new Array(tok.length).fill(-1);
+    for (let i = 0; i < tok.length; i++) {
+      if (tok[i].type === "word") { map[i] = w.length; w.push(tok[i]); }
+    }
+    return { tokens: tok, words: w, wordIndexMap: map };
+  }, [transcript]);
+
+  // DOM refs into the transcript so the rAF tick can toggle the active
+  // class directly — no React render per frame.
+  const wordElsRef = useRef([]);
+  const scrollRef = useRef(null);
+  const activeIdxRef = useRef(-1);
+  const userScrollRef = useRef(false);
+  const userScrollTimerRef = useRef(0);
+
+  // Reset DOM-ref state when the doc / token set changes.
+  useEffect(() => {
+    wordElsRef.current = new Array(words.length).fill(null);
+    activeIdxRef.current = -1;
+  }, [words]);
 
   useImperativeHandle(ref, () => ({
     seekTo(seconds) {
@@ -119,13 +145,44 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
     };
   }, [playerReady]);
 
+  // rAF read-along loop. This is the hot path — runs every frame the
+  // browser paints (~60Hz) while the video plays. We never call setState
+  // here; we just mutate two DOM nodes (the previously-active span and
+  // the newly-active one). No React reconciliation, no parent re-render,
+  // no list iteration — just classList.toggle, which is sub-millisecond.
+  // That's why the highlight no longer lags-then-skips: there's literally
+  // nothing for it to back up on.
   useEffect(() => {
     cancelAnimationFrame(pollRef.current);
     if (!playing) return;
+
     const tick = () => {
-      const t = playerRef.current?.getCurrentTime?.();
+      const player = playerRef.current;
+      const t = player?.getCurrentTime?.();
       if (t != null) {
-        setCurrentTime(t);
+        // Find active word via binary search (stable at any size).
+        const nextIdx = findActiveWordIdx(words, t);
+        const prevIdx = activeIdxRef.current;
+        if (nextIdx !== prevIdx) {
+          if (prevIdx >= 0) {
+            const prevEl = wordElsRef.current[prevIdx];
+            if (prevEl) prevEl.classList.remove("yt-word-active");
+          }
+          if (nextIdx >= 0) {
+            const nextEl = wordElsRef.current[nextIdx];
+            if (nextEl) {
+              nextEl.classList.add("yt-word-active");
+              // Scroll-in-view only on word change (not every frame), and
+              // only when the user isn't actively scrolling themselves.
+              // behavior:"auto" so smooth-scroll never queues up multiple
+              // animations behind one another.
+              if (!userScrollRef.current) {
+                nextEl.scrollIntoView({ behavior: "auto", block: "nearest" });
+              }
+            }
+          }
+          activeIdxRef.current = nextIdx;
+        }
         if (onScrollProgress && duration > 0) {
           onScrollProgress(Math.min(t / duration, 1));
         }
@@ -134,7 +191,13 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
     };
     pollRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(pollRef.current);
-  }, [playing, duration, onScrollProgress]);
+  }, [playing, words, duration, onScrollProgress]);
+
+  const handleScroll = useCallback(() => {
+    userScrollRef.current = true;
+    clearTimeout(userScrollTimerRef.current);
+    userScrollTimerRef.current = setTimeout(() => { userScrollRef.current = false; }, AUTO_SCROLL_PAUSE_MS);
+  }, []);
 
   const handleSeek = useCallback((offset) => {
     playerRef.current?.seekTo(offset, true);
@@ -175,8 +238,11 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
 
       <ParagraphTranscript
         T={T}
-        transcript={transcript}
-        currentTime={currentTime}
+        tokens={tokens}
+        wordIndexMap={wordIndexMap}
+        wordElsRef={wordElsRef}
+        scrollRef={scrollRef}
+        onScroll={handleScroll}
         onSeek={handleSeek}
       />
     </div>
@@ -235,52 +301,16 @@ function findActiveWordIdx(words, time) {
   return best;
 }
 
-// Paragraph-style transcript with karaoke-style read-along highlight.
-// Past words read at full strength (T.text), the current word is lifted
-// with a subtle background tint, and upcoming words sit muted in
-// T.textLight so the eye naturally tracks forward. Click any word to
-// seek the video to that point.
-const ParagraphTranscript = memo(function ParagraphTranscript({ T, transcript, currentTime, onSeek }) {
-  const scrollRef = useRef(null);
-  const activeWordRef = useRef(null);
-  const userScrollRef = useRef(false);
-  const timerRef = useRef(0);
-
-  // tokens contains both words (with start times) and whitespace; the
-  // wordIndexMap maps token index -> word-only index (used to find the
-  // active token after binary-searching words[]).
-  const { tokens, words, wordIndexMap } = useMemo(() => {
-    const tok = tokenizeTranscript(transcript || []);
-    const w = [];
-    const map = new Array(tok.length).fill(-1);
-    for (let i = 0; i < tok.length; i++) {
-      if (tok[i].type === "word") {
-        map[i] = w.length;
-        w.push(tok[i]);
-      }
-    }
-    return { tokens: tok, words: w, wordIndexMap: map };
-  }, [transcript]);
-
-  const activeWord = findActiveWordIdx(words, currentTime);
-
-  // Auto-scroll the active word into view, but only when the user
-  // hasn't recently scrolled themselves. block: "nearest" keeps the
-  // motion minimal — no scroll happens if the word is already on-screen.
-  useEffect(() => {
-    if (userScrollRef.current) return;
-    if (activeWord < 0) return;
-    const el = activeWordRef.current;
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [activeWord]);
-
-  const handleScroll = useCallback(() => {
-    userScrollRef.current = true;
-    clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => { userScrollRef.current = false; }, AUTO_SCROLL_PAUSE_MS);
-  }, []);
-
-  if (!transcript.length) {
+// Paragraph-style transcript. Renders ONCE per transcript (memoized on
+// the tokens array) — the per-frame highlight is driven by direct DOM
+// mutation in the parent's rAF loop, NOT by re-rendering this tree.
+// That removes the React reconciliation cost from the hot path, which
+// was the source of the lag-then-skip pattern when the audio outran
+// the parent's render cycle.
+const ParagraphTranscript = memo(function ParagraphTranscript({
+  T, tokens, wordIndexMap, wordElsRef, scrollRef, onScroll, onSeek,
+}) {
+  if (!tokens.length) {
     return (
       <div style={{
         flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
@@ -290,37 +320,50 @@ const ParagraphTranscript = memo(function ParagraphTranscript({ T, transcript, c
       </div>
     );
   }
-
   return (
     <div
       id="video-transcript-pane"
       ref={scrollRef}
-      onScroll={handleScroll}
+      onScroll={onScroll}
       style={{
         flex: 1, overflowY: "auto", minHeight: 0,
         padding: "20px 22px",
         fontFamily: T.fontBody, fontSize: 14, lineHeight: 1.85,
-        color: T.textLight,
+        color: T.textMid,
         userSelect: "text",
+        // Theme-driven active-word styling lives on a CSS-var so the
+        // class toggled by the rAF loop picks up the current theme
+        // automatically — no JS restyle needed on dark-mode toggle.
+        "--yt-word-active-color": T.text,
+        "--yt-word-active-bg": `${T.easy}40`,
       }}
     >
+      {/* Scoped styles for the read-along highlight. Inlined here so
+          the rule lives with the only component that uses it. */}
+      <style>{`
+        #video-transcript-pane .yt-word.yt-word-active {
+          color: var(--yt-word-active-color);
+          background: var(--yt-word-active-bg);
+          font-weight: 700;
+        }
+      `}</style>
       <p style={{ margin: 0 }}>
         {tokens.map((t, i) => {
-          if (t.type === "space") {
-            return <span key={i}>{t.text}</span>;
-          }
+          if (t.type === "space") return <span key={i}>{t.text}</span>;
           const wIdx = wordIndexMap[i];
-          const isActive = wIdx === activeWord;
           return (
-            <Word
+            <span
               key={i}
-              ref={isActive ? activeWordRef : null}
-              T={T}
-              text={t.text}
-              start={t.start}
-              isActive={isActive}
-              onSeek={onSeek}
-            />
+              ref={el => { wordElsRef.current[wIdx] = el; }}
+              className="yt-word"
+              data-timestamp={t.start}
+              onClick={() => onSeek(t.start)}
+              style={{
+                padding: "0 2px",
+                borderRadius: 3,
+                cursor: "pointer",
+              }}
+            >{t.text}</span>
           );
         })}
       </p>
@@ -328,29 +371,3 @@ const ParagraphTranscript = memo(function ParagraphTranscript({ T, transcript, c
     </div>
   );
 });
-
-// Memoized word span. Each tick only re-renders the two boundary words
-// whose isActive flipped (memo's shallowEqual skips every other word),
-// so even multi-thousand-word transcripts stay smooth at rAF cadence.
-// All non-active words use the same body color so only the spoken word
-// stands out — true read-along, not "consumed vs remaining".
-const Word = memo(forwardRef(function Word({ T, text, start, isActive, onSeek }, ref) {
-  return (
-    <span
-      ref={ref}
-      data-timestamp={start}
-      onClick={() => onSeek(start)}
-      style={{
-        color: isActive ? T.text : T.textMid,
-        background: isActive ? `${T.easy}40` : "transparent",
-        padding: "0 2px",
-        borderRadius: 3,
-        cursor: "pointer",
-        fontWeight: isActive ? 700 : 400,
-        // No transition on the active highlight — needs to snap to the
-        // word, not fade in over 100ms. A fade visibly lags the audio.
-        transition: "none",
-      }}
-    >{text}</span>
-  );
-}));
