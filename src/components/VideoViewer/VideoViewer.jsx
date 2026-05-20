@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef, useMemo, useCallback, useImperativeHandle, forwardRef, memo } from "react";
 import useTheme from "../../theme/useTheme.js";
 
-const POLL_MS = 250;
+// Use rAF for player time sampling so the read-along highlight tracks
+// the audio with a single frame of latency instead of the 250ms chunks
+// a setInterval-based poll produced. Each tick is just a sync
+// player.getCurrentTime() call plus one setState — cheap.
 const AUTO_SCROLL_PAUSE_MS = 3000;
 
 let ytApiLoading = false;
@@ -78,7 +81,7 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
 
     return () => {
       destroyed = true;
-      clearInterval(pollRef.current);
+      cancelAnimationFrame(pollRef.current);
       if (player?.destroy) try { player.destroy(); } catch {}
       playerRef.current = null;
       setPlayerReady(false);
@@ -117,9 +120,9 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
   }, [playerReady]);
 
   useEffect(() => {
-    clearInterval(pollRef.current);
+    cancelAnimationFrame(pollRef.current);
     if (!playing) return;
-    pollRef.current = setInterval(() => {
+    const tick = () => {
       const t = playerRef.current?.getCurrentTime?.();
       if (t != null) {
         setCurrentTime(t);
@@ -127,8 +130,10 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
           onScrollProgress(Math.min(t / duration, 1));
         }
       }
-    }, POLL_MS);
-    return () => clearInterval(pollRef.current);
+      pollRef.current = requestAnimationFrame(tick);
+    };
+    pollRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(pollRef.current);
   }, [playing, duration, onScrollProgress]);
 
   const handleSeek = useCallback((offset) => {
@@ -181,11 +186,15 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
 export default VideoViewer;
 
 // Flatten the segment-level transcript into per-word tokens with
-// estimated start times. YouTube only gives us segment-level timing
-// (one offset + duration per ~1-10 word utterance), so we distribute
-// each segment's duration evenly across its words. Not literally
-// accurate but visually convincing for a karaoke-style read-along —
-// the highlight tracks the spoken cadence to within ~500ms.
+// estimated start times. YouTube only gives segment-level timing (one
+// offset + duration per ~1-10 word utterance), so we have to estimate
+// where each word falls within its segment.
+//
+// Naive "split duration evenly across words" makes long words fly by
+// too fast and short words drag — the highlight feels out of step. We
+// weight each word's slice by character count instead; this tracks
+// natural speech rhythm a lot better since speakers spend proportionally
+// more time on longer words.
 function tokenizeTranscript(transcript) {
   const tokens = [];
   for (let s = 0; s < transcript.length; s++) {
@@ -193,17 +202,15 @@ function tokenizeTranscript(transcript) {
     const segOffset = seg.offset ?? seg.start ?? 0;
     const segDuration = seg.duration ?? 0;
     const parts = (seg.text || "").split(/(\s+)/);
-    // Words only (non-whitespace) drive timing; whitespace tokens are
-    // emitted between them as plain text.
-    const wordCount = parts.filter(p => /\S/.test(p)).length;
-    const perWord = wordCount > 0 ? segDuration / wordCount : 0;
-    let wordI = 0;
+    const wordParts = parts.filter(p => /\S/.test(p));
+    const totalChars = wordParts.reduce((sum, w) => sum + w.length, 0) || 1;
+    let consumedChars = 0;
     for (const part of parts) {
       if (!part) continue;
       if (/\S/.test(part)) {
-        const start = segOffset + wordI * perWord;
+        const start = segOffset + (consumedChars / totalChars) * segDuration;
         tokens.push({ type: "word", text: part, start });
-        wordI++;
+        consumedChars += part.length;
       } else {
         tokens.push({ type: "space", text: part });
       }
@@ -304,7 +311,6 @@ const ParagraphTranscript = memo(function ParagraphTranscript({ T, transcript, c
           }
           const wIdx = wordIndexMap[i];
           const isActive = wIdx === activeWord;
-          const isPast = wIdx < activeWord;
           return (
             <Word
               key={i}
@@ -313,7 +319,6 @@ const ParagraphTranscript = memo(function ParagraphTranscript({ T, transcript, c
               text={t.text}
               start={t.start}
               isActive={isActive}
-              isPast={isPast}
               onSeek={onSeek}
             />
           );
@@ -324,24 +329,27 @@ const ParagraphTranscript = memo(function ParagraphTranscript({ T, transcript, c
   );
 });
 
-// Memoized word span. Each tick only re-renders the small handful of
-// words whose isActive/isPast actually changed (memo's shallowEqual
-// skips the rest), so even multi-thousand-word transcripts stay smooth.
-const Word = memo(forwardRef(function Word({ T, text, start, isActive, isPast, onSeek }, ref) {
-  const color = isActive ? T.text : (isPast ? T.text : T.textLight);
+// Memoized word span. Each tick only re-renders the two boundary words
+// whose isActive flipped (memo's shallowEqual skips every other word),
+// so even multi-thousand-word transcripts stay smooth at rAF cadence.
+// All non-active words use the same body color so only the spoken word
+// stands out — true read-along, not "consumed vs remaining".
+const Word = memo(forwardRef(function Word({ T, text, start, isActive, onSeek }, ref) {
   return (
     <span
       ref={ref}
       data-timestamp={start}
       onClick={() => onSeek(start)}
       style={{
-        color,
-        background: isActive ? `${T.easy}33` : "transparent",
-        padding: "0 1px",
+        color: isActive ? T.text : T.textMid,
+        background: isActive ? `${T.easy}40` : "transparent",
+        padding: "0 2px",
         borderRadius: 3,
         cursor: "pointer",
-        fontWeight: isActive ? 600 : (isPast ? 500 : 400),
-        transition: "background 0.12s, color 0.12s",
+        fontWeight: isActive ? 700 : 400,
+        // No transition on the active highlight — needs to snap to the
+        // word, not fade in over 100ms. A fade visibly lags the audio.
+        transition: "none",
       }}
     >{text}</span>
   );
