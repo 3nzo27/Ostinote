@@ -23,7 +23,7 @@ import {
   listHighlights, saveHighlight,
 } from "../../utils/documentStore.js";
 import { extractPdfText } from "../../utils/pdfConverter.js";
-import { parseYouTubeUrl, fetchTranscript, fetchVideoInfo, formatTranscriptAsText } from "../../utils/youtubeTranscript.js";
+import { parseYouTubeUrl, fetchTranscript, fetchVideoInfo, fetchWordTimings, formatTranscriptAsText } from "../../utils/youtubeTranscript.js";
 
 // Workspace tabs are documents only — decks live in the Tool Bar (right
 // sidebar) under their own "Cards" tab. The middle pane stays focused on
@@ -516,9 +516,13 @@ export default function WorkspaceView({
     setUploadError(null);
     try {
       setUploadProgress({ stage: "transcript", percent: 20 });
-      const [info, segments] = await Promise.all([
+      const [info, segments, wordTimings] = await Promise.all([
         fetchVideoInfo(videoId).catch(() => ({ title: null })),
         fetchTranscript(videoId),
+        // Word timings are best-effort — auto-captioned videos have
+        // them, manually-captioned videos sometimes don't. We fall
+        // back to deriving them from segments below if missing.
+        fetchWordTimings(videoId).catch(() => null),
       ]);
       setUploadProgress({ stage: "saving", percent: 80 });
       const textContent = formatTranscriptAsText(segments);
@@ -530,6 +534,7 @@ export default function WorkspaceView({
         type: "youtube",
         videoId,
         transcript: segments,
+        wordTimings: wordTimings || null,
         hasPdf: false,
         markdown: null,
         pageCount: null,

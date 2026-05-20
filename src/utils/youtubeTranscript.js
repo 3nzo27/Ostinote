@@ -44,6 +44,29 @@ export async function fetchTranscript(videoId) {
   }));
 }
 
+// Fetches YouTube's word-level caption timing (json3 format). Returns
+// a flat array of { text, start } where start is in seconds. Falls
+// back through the Electron bridge → Vite dev plugin → throws.
+//
+// This is the perfect timing source — it's the same data YouTube uses
+// to render captions, with millisecond accuracy per word for auto-
+// generated captions. No estimation, no interpolation needed.
+export async function fetchWordTimings(videoId) {
+  if (window.ostinoteYT?.getWordTimings) {
+    return window.ostinoteYT.getWordTimings({ videoId });
+  }
+  const res = await fetch("/_yt/word-timings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ videoId }),
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => "Unknown error");
+    throw new Error(msg || "Failed to fetch word timings");
+  }
+  return res.json();
+}
+
 export async function fetchVideoInfo(videoId) {
   if (window.ostinoteYT?.getVideoInfo) {
     return window.ostinoteYT.getVideoInfo({ videoId });

@@ -1,28 +1,14 @@
 import { useState, useEffect, useRef, useMemo, useCallback, useImperativeHandle, forwardRef, memo } from "react";
 import useTheme from "../../theme/useTheme.js";
+import { fetchWordTimings } from "../../utils/youtubeTranscript.js";
+import { updateDocument } from "../../utils/documentStore.js";
 
-// Use rAF for player time sampling so the read-along highlight tracks
-// the audio with a single frame of latency instead of the 250ms chunks
-// a setInterval-based poll produced. Each tick is just a sync
-// player.getCurrentTime() call plus one setState — cheap.
+// Read-along uses YouTube's json3 caption data (doc.wordTimings),
+// which has per-word timing with millisecond accuracy — the same data
+// YouTube uses to render its native captions. No estimation, no
+// interpolation, no per-doc calibration: light up the word whose
+// start <= currentTime, period.
 const AUTO_SCROLL_PAUSE_MS = 3000;
-
-// Default highlight lead in ms — how much earlier than YT's reported
-// time we mark a word as active, to compensate for the stacking
-// latencies of (a) auto-transcript stamps being late, (b) audio output
-// buffering, and (c) browser-specific playback delay. The exact right
-// value varies per video and per device, so we ship a sensible default
-// and let the user nudge it live with [ and ] (saved per doc).
-const HIGHLIGHT_LEAD_MS_DEFAULT = 800;
-const HIGHLIGHT_LEAD_STEP_MS = 100;
-const HIGHLIGHT_LEAD_MIN_MS = -500;
-const HIGHLIGHT_LEAD_MAX_MS = 2500;
-const LEAD_STORAGE_PREFIX = "ostinote_video_lead_";
-
-// We don't need to update the workspace's tiny scroll-progress stripe
-// 60 times per second. Throttling it down so the rAF loop doesn't
-// trigger a parent re-render on every single frame frees up the main
-// thread to actually paint the highlight on time.
 const PROGRESS_THROTTLE_MS = 250;
 
 let ytApiLoading = false;
@@ -57,20 +43,38 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
   const [playerReady, setPlayerReady] = useState(false);
   const pollRef = useRef(0);
 
-  const transcript = doc?.transcript || [];
+  // Word-level timing comes from YouTube's json3 caption data
+  // (perfect timing). New docs already have it on doc.wordTimings; for
+  // pre-existing docs that don't, lazy-fetch on mount and persist.
+  const [wordTimings, setWordTimings] = useState(doc?.wordTimings || null);
+  const [wordTimingsError, setWordTimingsError] = useState(null);
+  useEffect(() => {
+    setWordTimings(doc?.wordTimings || null);
+    setWordTimingsError(null);
+  }, [doc?.id, doc?.wordTimings]);
+  useEffect(() => {
+    if (wordTimings || !doc?.videoId) return;
+    let cancelled = false;
+    fetchWordTimings(doc.videoId)
+      .then(words => {
+        if (cancelled || !words?.length) return;
+        setWordTimings(words);
+        // Cache to the doc so we don't re-fetch next time.
+        updateDocument(doc.id, { wordTimings: words }).catch(() => {});
+      })
+      .catch(err => { if (!cancelled) setWordTimingsError(err.message || "Failed to load captions"); });
+    return () => { cancelled = true; };
+  }, [wordTimings, doc?.id, doc?.videoId]);
 
-  // Tokenize the transcript here (not inside the child) so the rAF
-  // callback has direct access to `words` without a closure over the
-  // child's state. The child only renders once per transcript change.
   const { tokens, words, wordIndexMap } = useMemo(() => {
-    const tok = tokenizeTranscript(transcript);
+    const tok = buildTokens(wordTimings);
     const w = [];
     const map = new Array(tok.length).fill(-1);
     for (let i = 0; i < tok.length; i++) {
       if (tok[i].type === "word") { map[i] = w.length; w.push(tok[i]); }
     }
     return { tokens: tok, words: w, wordIndexMap: map };
-  }, [transcript]);
+  }, [wordTimings]);
 
   // DOM refs into the transcript so the rAF tick can toggle the active
   // class directly — no React render per frame.
@@ -81,50 +85,9 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
   const userScrollTimerRef = useRef(0);
 
   // Reset only the active-word marker when the doc / token set changes.
-  // We must NOT clear wordElsRef here — the callback refs on each word
-  // span have already populated it during mount, so wiping it here would
-  // immediately erase every reference and the rAF tick would never find
-  // a span to highlight. React handles per-element cleanup automatically
-  // (old refs are called with null when spans unmount).
   useEffect(() => {
     activeIdxRef.current = -1;
   }, [words]);
-
-  // Per-doc karaoke sync calibration. The exact lead needed varies a
-  // lot by video + device, so we let the user nudge it live with [ and ]
-  // and persist the value per doc id. The rAF tick reads from a ref so
-  // we don't have to tear down and rebuild the loop on every change.
-  const [leadMs, setLeadMs] = useState(() => {
-    if (!doc?.id) return HIGHLIGHT_LEAD_MS_DEFAULT;
-    try {
-      const v = parseInt(localStorage.getItem(LEAD_STORAGE_PREFIX + doc.id) || "", 10);
-      return Number.isFinite(v) ? v : HIGHLIGHT_LEAD_MS_DEFAULT;
-    } catch { return HIGHLIGHT_LEAD_MS_DEFAULT; }
-  });
-  const leadMsRef = useRef(leadMs);
-  useEffect(() => { leadMsRef.current = leadMs; }, [leadMs]);
-  const [calibrationHint, setCalibrationHint] = useState(0); // bumps to refresh the visible chip
-  const calibrationHintTimer = useRef(0);
-  useEffect(() => {
-    if (!doc?.id) return;
-    try { localStorage.setItem(LEAD_STORAGE_PREFIX + doc.id, String(leadMs)); } catch {}
-  }, [leadMs, doc?.id]);
-  useEffect(() => {
-    if (!playerReady) return;
-    const onKey = (e) => {
-      // Don't steal keystrokes from inputs / textareas / contenteditable.
-      const tag = (e.target?.tagName || "").toUpperCase();
-      if (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable) return;
-      if (e.key !== "[" && e.key !== "]") return;
-      const delta = e.key === "[" ? -HIGHLIGHT_LEAD_STEP_MS : HIGHLIGHT_LEAD_STEP_MS;
-      setLeadMs(prev => Math.max(HIGHLIGHT_LEAD_MIN_MS, Math.min(HIGHLIGHT_LEAD_MAX_MS, prev + delta)));
-      setCalibrationHint(c => c + 1);
-      clearTimeout(calibrationHintTimer.current);
-      calibrationHintTimer.current = setTimeout(() => setCalibrationHint(0), 1400);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [playerReady]);
 
   useImperativeHandle(ref, () => ({
     seekTo(seconds) {
@@ -213,45 +176,16 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
   useEffect(() => {
     cancelAnimationFrame(pollRef.current);
     if (!playing) return;
-
-    // === Client-side time interpolation ===
-    // YouTube's IFrame API only refreshes getCurrentTime() internally
-    // ~4 times per second. Polling at 60Hz returns the same stale value
-    // most frames, so the highlight only moves when YT happens to
-    // refresh — which felt like 4Hz updates with occasional skips.
-    //
-    // Instead: use YT's reported time ONLY as a sync point. Between
-    // refreshes, project the time forward from the last sync using
-    // wall-clock elapsed * playback rate. Result: a smooth 60Hz time
-    // signal that locks to YT whenever the API gives us a new value.
     let lastProgressAt = 0;
-    let syncMediaT = null;   // YT's currentTime at the last real update
-    let syncWallT = null;    // performance.now() at that moment
-    let prevReportedT = null;
-
     const tick = () => {
       const player = playerRef.current;
-      const reportedT = player?.getCurrentTime?.();
+      const t = player?.getCurrentTime?.();
       const now = performance.now();
-
-      if (reportedT != null) {
-        // YT actually advanced? Re-sync. Also catches seeks: if the
-        // reported time disagrees materially with our projection, we
-        // trust YT and reset the base.
-        const projected = (syncMediaT != null)
-          ? syncMediaT + ((now - syncWallT) / 1000) * (player.getPlaybackRate?.() || 1)
-          : reportedT;
-        if (prevReportedT == null || reportedT !== prevReportedT || Math.abs(reportedT - projected) > 0.4) {
-          syncMediaT = reportedT;
-          syncWallT = now;
-          prevReportedT = reportedT;
-        }
-
-        const estimatedT = syncMediaT + ((now - syncWallT) / 1000) * (player.getPlaybackRate?.() || 1);
-
-        // Read the live lead value from a ref so [ and ] take effect
-        // on the very next frame, without restarting the rAF loop.
-        const nextIdx = findActiveWordIdx(words, estimatedT + leadMsRef.current / 1000);
+      if (t != null) {
+        // Word timings come from YouTube's caption JSON — same data
+        // YT uses to render its native captions, with millisecond
+        // accuracy. Just find the active word and toggle the class.
+        const nextIdx = findActiveWordIdx(words, t);
         const prevIdx = activeIdxRef.current;
         if (nextIdx !== prevIdx) {
           if (prevIdx >= 0) {
@@ -274,10 +208,8 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
           }
           activeIdxRef.current = nextIdx;
         }
-        // Throttle the parent re-render that the progress callback
-        // triggers — we don't need 60Hz updates on the scroll stripe.
         if (onScrollProgress && duration > 0 && now - lastProgressAt >= PROGRESS_THROTTLE_MS) {
-          onScrollProgress(Math.min(estimatedT / duration, 1));
+          onScrollProgress(Math.min(t / duration, 1));
           lastProgressAt = now;
         }
       }
@@ -330,71 +262,39 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
         }} />
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, position: "relative", display: "flex", flexDirection: "column" }}>
-        <ParagraphTranscript
-          T={T}
-          tokens={tokens}
-          wordIndexMap={wordIndexMap}
-          wordElsRef={wordElsRef}
-          scrollRef={scrollRef}
-          onScroll={handleScroll}
-          onSeek={handleSeek}
-        />
-        {/* Calibration chip — appears briefly each time you press
-            [ or ] to tune the karaoke offset. The current lead is
-            persisted per doc so you only need to dial it in once. */}
-        {calibrationHint > 0 && (
-          <div style={{
-            position: "absolute", top: 8, right: 12,
-            padding: "5px 10px", borderRadius: 999,
-            background: T.text, color: T.card,
-            fontSize: 11, fontWeight: 600, fontFamily: T.fontBody,
-            boxShadow: T.shadow2 || "0 2px 8px rgba(0,0,0,0.18)",
-            pointerEvents: "none",
-          }}>
-            Sync {leadMs >= 0 ? "+" : ""}{leadMs}ms  &nbsp;&middot;&nbsp;  [ / ] to adjust
-          </div>
-        )}
-      </div>
+      <ParagraphTranscript
+        T={T}
+        tokens={tokens}
+        wordIndexMap={wordIndexMap}
+        wordElsRef={wordElsRef}
+        scrollRef={scrollRef}
+        onScroll={handleScroll}
+        onSeek={handleSeek}
+        loading={!wordTimings && !wordTimingsError}
+        error={wordTimingsError}
+      />
     </div>
   );
 });
 
 export default VideoViewer;
 
-// Flatten the segment-level transcript into per-word tokens with
-// estimated start times. YouTube only gives segment-level timing (one
-// offset + duration per ~1-10 word utterance), so we have to estimate
-// where each word falls within its segment.
-//
-// Naive "split duration evenly across words" makes long words fly by
-// too fast and short words drag — the highlight feels out of step. We
-// weight each word's slice by character count instead; this tracks
-// natural speech rhythm a lot better since speakers spend proportionally
-// more time on longer words.
-function tokenizeTranscript(transcript) {
+// Build the flat token list (words + whitespace) from json3 word
+// timings. Word timings come from YouTube's caption data verbatim, so
+// each word's `start` is the real start time of the spoken word.
+// We weave in space tokens between consecutive words so the rendered
+// paragraph reads naturally.
+function buildTokens(wordTimings) {
+  if (!wordTimings || !wordTimings.length) return [];
   const tokens = [];
-  for (let s = 0; s < transcript.length; s++) {
-    const seg = transcript[s];
-    const segOffset = seg.offset ?? seg.start ?? 0;
-    const segDuration = seg.duration ?? 0;
-    const parts = (seg.text || "").split(/(\s+)/);
-    const wordParts = parts.filter(p => /\S/.test(p));
-    const totalChars = wordParts.reduce((sum, w) => sum + w.length, 0) || 1;
-    let consumedChars = 0;
-    for (const part of parts) {
-      if (!part) continue;
-      if (/\S/.test(part)) {
-        const start = segOffset + (consumedChars / totalChars) * segDuration;
-        const end = segOffset + ((consumedChars + part.length) / totalChars) * segDuration;
-        tokens.push({ type: "word", text: part, start, end });
-        consumedChars += part.length;
-      } else {
-        tokens.push({ type: "space", text: part });
-      }
-    }
-    // Ensure visual separation between consecutive segments.
-    tokens.push({ type: "space", text: " " });
+  for (let i = 0; i < wordTimings.length; i++) {
+    const w = wordTimings[i];
+    // The token text from json3 sometimes already includes a leading
+    // newline or space; normalize whitespace so it just renders inline.
+    const text = String(w.text || "").replace(/\s+/g, " ");
+    if (!text || text === " ") continue;
+    if (i > 0) tokens.push({ type: "space", text: " " });
+    tokens.push({ type: "word", text: text.trim(), start: w.start });
   }
   return tokens;
 }
@@ -421,14 +321,26 @@ function findActiveWordIdx(words, time) {
 // the parent's render cycle.
 const ParagraphTranscript = memo(function ParagraphTranscript({
   T, tokens, wordIndexMap, wordElsRef, scrollRef, onScroll, onSeek,
+  loading, error,
 }) {
-  if (!tokens.length) {
+  if (loading) {
     return (
       <div style={{
         flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
         color: T.textLight, fontSize: 13, fontFamily: T.fontBody, padding: 32,
       }}>
-        No transcript available for this video.
+        Loading captions…
+      </div>
+    );
+  }
+  if (error || !tokens.length) {
+    return (
+      <div style={{
+        flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+        color: T.textLight, fontSize: 13, fontFamily: T.fontBody, padding: 32,
+        textAlign: "center", maxWidth: 360, margin: "0 auto",
+      }}>
+        {error || "No captions available for this video."}
       </div>
     );
   }

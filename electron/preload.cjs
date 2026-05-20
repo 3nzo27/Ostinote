@@ -21,4 +21,5 @@ contextBridge.exposeInMainWorld("ostinoteAI", {
 contextBridge.exposeInMainWorld("ostinoteYT", {
   getTranscript: ({ videoId }) => ipcRenderer.invoke("yt:transcript", { videoId }),
   getVideoInfo: ({ videoId }) => ipcRenderer.invoke("yt:video-info", { videoId }),
+  getWordTimings: ({ videoId }) => ipcRenderer.invoke("yt:word-timings", { videoId }),
 });

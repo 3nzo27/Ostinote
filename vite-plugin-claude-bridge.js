@@ -80,6 +80,37 @@ function readBody(req) {
   });
 }
 
+// Fetches YouTube's auto-generated caption track in json3 format, which
+// includes per-word timing. Returns a flat list of { text, start } with
+// start in seconds. Mirrors electron/main.cjs fetchYouTubeWordTimings.
+async function fetchYouTubeWordTimings(videoId) {
+  const html = await (await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+    headers: { "User-Agent": "Mozilla/5.0" },
+  })).text();
+  const match = html.match(/"captionTracks":(\[.+?\])/);
+  if (!match) throw new Error("No caption tracks on this video");
+  const tracks = JSON.parse(match[1]);
+  if (!tracks.length) throw new Error("No caption tracks on this video");
+  const track = tracks.find(t => (t.languageCode || "").startsWith("en"))
+             || tracks.find(t => (t.vssId || "").startsWith(".en"))
+             || tracks[0];
+  const baseUrl = String(track.baseUrl || "").replace(/\\u0026/g, "&");
+  if (!baseUrl) throw new Error("Caption track has no URL");
+  const json3 = await (await fetch(`${baseUrl}&fmt=json3`)).json();
+  const words = [];
+  for (const event of json3.events || []) {
+    if (!event.segs) continue;
+    const tStart = event.tStartMs || 0;
+    for (const seg of event.segs) {
+      const text = seg.utf8;
+      if (!text || !/\S/.test(text)) continue;
+      words.push({ text, start: (tStart + (seg.tOffsetMs || 0)) / 1000 });
+    }
+  }
+  if (!words.length) throw new Error("Caption track was empty");
+  return words;
+}
+
 export default function claudeBridge() {
   return {
     name: "ostinote-claude-bridge",
@@ -112,6 +143,15 @@ export default function claudeBridge() {
             const data = await resp.json();
             res.setHeader("Content-Type", "application/json");
             res.end(JSON.stringify({ title: data.title, author_name: data.author_name, thumbnail_url: data.thumbnail_url }));
+            return;
+          }
+          if (req.url === "/_yt/word-timings" && req.method === "POST") {
+            const body = await readBody(req);
+            const videoId = typeof body.videoId === "string" ? body.videoId : null;
+            if (!videoId) { res.statusCode = 400; res.end("videoId is required"); return; }
+            const words = await fetchYouTubeWordTimings(videoId);
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify(words));
             return;
           }
           res.statusCode = 404;
