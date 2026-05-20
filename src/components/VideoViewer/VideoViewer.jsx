@@ -175,17 +175,43 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
     cancelAnimationFrame(pollRef.current);
     if (!playing) return;
 
+    // === Client-side time interpolation ===
+    // YouTube's IFrame API only refreshes getCurrentTime() internally
+    // ~4 times per second. Polling at 60Hz returns the same stale value
+    // most frames, so the highlight only moves when YT happens to
+    // refresh — which felt like 4Hz updates with occasional skips.
+    //
+    // Instead: use YT's reported time ONLY as a sync point. Between
+    // refreshes, project the time forward from the last sync using
+    // wall-clock elapsed * playback rate. Result: a smooth 60Hz time
+    // signal that locks to YT whenever the API gives us a new value.
     let lastProgressAt = 0;
+    let syncMediaT = null;   // YT's currentTime at the last real update
+    let syncWallT = null;    // performance.now() at that moment
+    let prevReportedT = null;
     const leadSec = HIGHLIGHT_LEAD_MS / 1000;
 
     const tick = () => {
       const player = playerRef.current;
-      const t = player?.getCurrentTime?.();
-      if (t != null) {
-        // Find active word via binary search on currentTime + lead
-        // offset so the highlight is in step with the user's actual
-        // hearing, not with YT's transcript metadata.
-        const nextIdx = findActiveWordIdx(words, t + leadSec);
+      const reportedT = player?.getCurrentTime?.();
+      const now = performance.now();
+
+      if (reportedT != null) {
+        // YT actually advanced? Re-sync. Also catches seeks: if the
+        // reported time disagrees materially with our projection, we
+        // trust YT and reset the base.
+        const projected = (syncMediaT != null)
+          ? syncMediaT + ((now - syncWallT) / 1000) * (player.getPlaybackRate?.() || 1)
+          : reportedT;
+        if (prevReportedT == null || reportedT !== prevReportedT || Math.abs(reportedT - projected) > 0.4) {
+          syncMediaT = reportedT;
+          syncWallT = now;
+          prevReportedT = reportedT;
+        }
+
+        const estimatedT = syncMediaT + ((now - syncWallT) / 1000) * (player.getPlaybackRate?.() || 1);
+
+        const nextIdx = findActiveWordIdx(words, estimatedT + leadSec);
         const prevIdx = activeIdxRef.current;
         if (nextIdx !== prevIdx) {
           if (prevIdx >= 0) {
@@ -196,10 +222,6 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
             const nextEl = wordElsRef.current[nextIdx];
             if (nextEl) {
               nextEl.classList.add("yt-word-active");
-              // Scroll-in-view only on word change (not every frame),
-              // and only when the user isn't actively scrolling
-              // themselves. behavior:"auto" so smooth-scroll never
-              // queues up multiple animations behind one another.
               if (!userScrollRef.current) {
                 nextEl.scrollIntoView({ behavior: "auto", block: "nearest" });
               }
@@ -207,12 +229,10 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
           }
           activeIdxRef.current = nextIdx;
         }
-        // Throttle the progress callback — it triggers a parent React
-        // re-render which we don't want competing with the highlight
-        // paint every frame.
-        const now = performance.now();
+        // Throttle the parent re-render that the progress callback
+        // triggers — we don't need 60Hz updates on the scroll stripe.
         if (onScrollProgress && duration > 0 && now - lastProgressAt >= PROGRESS_THROTTLE_MS) {
-          onScrollProgress(Math.min(t / duration, 1));
+          onScrollProgress(Math.min(estimatedT / duration, 1));
           lastProgressAt = now;
         }
       }
