@@ -102,9 +102,6 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
   const activeIdxRef = useRef(-1);
   const userScrollRef = useRef(false);
   const userScrollTimerRef = useRef(0);
-  // Target scrollTop for the teleprompter follow. Set on word change;
-  // the rAF tick eases the actual scrollTop toward it.
-  const targetScrollRef = useRef(null);
   // The scrollTop value WE last wrote programmatically. The scroll
   // handler compares against it to tell our own auto-scroll apart from
   // a real user scroll — without this, every eased frame fires a
@@ -224,18 +221,26 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
             const nextEl = wordElsRef.current[nextIdx];
             if (nextEl) {
               nextEl.classList.add("yt-word-active");
-              // Teleprompter target — keep the active word anchored at
-              // ~30% from the top of the pane. We only SET the target
-              // here; the rAF tick eases the actual scrollTop toward
-              // it over multiple frames for a smooth follow.
+              // Line-at-a-time follow: keep the active word's line
+              // anchored ~30% down the pane. While reading across a
+              // single line the word stays put (delta ≈ 0, no scroll);
+              // the moment the highlight crosses onto a new line the
+              // word drifts a full line below the anchor and we snap
+              // the scroll by exactly that delta. The snap is instant
+              // (no easing) so the text steps line by line rather than
+              // gliding continuously.
               if (!userScrollRef.current && scrollRef.current) {
                 const cont = scrollRef.current;
                 const wRect = nextEl.getBoundingClientRect();
                 const cRect = cont.getBoundingClientRect();
-                const targetY = cRect.top + cRect.height * 0.3;
-                const delta = wRect.top - targetY;
-                if (Math.abs(delta) > 1) {
-                  targetScrollRef.current = cont.scrollTop + delta;
+                const lineH = wRect.height || 24;
+                const anchorY = cRect.top + cRect.height * 0.3;
+                const delta = wRect.top - anchorY;
+                // Only act once the word has drifted at least half a
+                // line off the anchor — i.e. it changed lines.
+                if (Math.abs(delta) > lineH * 0.5) {
+                  cont.scrollTop += delta;
+                  lastAutoScrollTopRef.current = cont.scrollTop;
                 }
               }
             }
@@ -246,24 +251,6 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
           onScrollProgress(Math.min(t / duration, 1));
           lastProgressAt = now;
         }
-      }
-      // Smooth teleprompter scroll. Each frame we move ~18% of the
-      // remaining distance toward target — eased exponential approach
-      // (Zeno's-style damping). At 60Hz the highlight glides into
-      // place over ~300ms instead of snapping per word, but the loop
-      // self-terminates once we're within a pixel so there's no
-      // perpetual sub-pixel motion.
-      if (targetScrollRef.current != null && !userScrollRef.current && scrollRef.current) {
-        const cont = scrollRef.current;
-        const remaining = targetScrollRef.current - cont.scrollTop;
-        const next = Math.abs(remaining) < 0.5
-          ? targetScrollRef.current
-          : cont.scrollTop + remaining * 0.18;
-        cont.scrollTop = next;
-        // Record what we wrote so the scroll handler recognizes this
-        // as our own scroll and doesn't treat it as a user grab.
-        lastAutoScrollTopRef.current = cont.scrollTop;
-        if (Math.abs(remaining) < 0.5) targetScrollRef.current = null;
       }
       pollRef.current = requestAnimationFrame(tick);
     };
@@ -278,7 +265,6 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
     // a mismatch means the user actually grabbed the scrollbar.
     if (cont && Math.abs(cont.scrollTop - lastAutoScrollTopRef.current) < 2) return;
     userScrollRef.current = true;
-    targetScrollRef.current = null; // abandon any pending auto-scroll
     clearTimeout(userScrollTimerRef.current);
     userScrollTimerRef.current = setTimeout(() => { userScrollRef.current = false; }, AUTO_SCROLL_PAUSE_MS);
   }, []);
