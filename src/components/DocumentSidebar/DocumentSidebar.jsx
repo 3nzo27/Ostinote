@@ -14,6 +14,7 @@ import ChatTab from "./ChatTab.jsx";
 import HighlightsTab from "./HighlightsTab.jsx";
 import ToolsTab from "./ToolsTab.jsx";
 import CardsTab from "./CardsTab.jsx";
+import QuizTab from "./QuizTab.jsx";
 
 // Resize bounds for the expanded sidebar. MIN keeps the tab strip
 // readable; MAX prevents the toolbar from eating the whole canvas.
@@ -39,6 +40,13 @@ const TABS = [
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="6" y="3" width="14" height="16" rx="2" />
       <path d="M4 7v12a2 2 0 0 0 2 2h12" />
+    </svg>
+  )},
+  { id: "quiz", label: "Quiz", icon: (c) => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
     </svg>
   )},
   { id: "tools", label: "Tools", icon: (c) => (
@@ -273,6 +281,7 @@ export default function DocumentSidebar({
           padding: "8px 12px", gap: 6,
           borderBottom: `1px solid ${T.border}`,
           flexShrink: 0,
+          overflowX: "auto", overflowY: "hidden",
         }}>
           {TABS.map(tab => {
             const active = activeTab === tab.id;
@@ -291,6 +300,7 @@ export default function DocumentSidebar({
                   fontFamily: T.fontBody,
                   cursor: "pointer",
                   transition: "all 0.15s",
+                  flexShrink: 0,
                 }}
                 onMouseEnter={e => {
                   if (!active) {
@@ -354,6 +364,14 @@ export default function DocumentSidebar({
               onDeleteDeck={onDeleteDeck}
             />
           )}
+          {activeTab === "quiz" && (doc ? (
+            <QuizTab
+              doc={doc}
+              aiSettings={aiSettings}
+              decks={decks}
+              onAddCardToDeck={onAddCardToDeck}
+            />
+          ) : <NoDocEmptyState T={T} activeTab="quiz" />)}
           {activeTab === "tools" && (doc ? (
             <ToolsTab
               doc={doc}
@@ -374,6 +392,7 @@ function NoDocEmptyState({ T, activeTab }) {
   const copy = {
     chat:  { title: "Chat with a document", body: "Open a PDF from the Library to ask questions and get cited answers." },
     notes: { title: "Highlights & notes",   body: "Open a PDF from the Library, then select text to start highlighting." },
+    quiz:  { title: "Quiz yourself",         body: "Open a PDF from the Library to generate a quiz and turn it into cards." },
     tools: { title: "Study tools",          body: "Open a PDF from the Library to auto-generate flashcards and summaries." },
   };
   const c = copy[activeTab] || copy.chat;
