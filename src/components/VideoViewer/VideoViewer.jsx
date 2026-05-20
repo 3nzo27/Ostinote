@@ -11,6 +11,13 @@ import { updateDocument } from "../../utils/documentStore.js";
 const AUTO_SCROLL_PAUSE_MS = 3000;
 const PROGRESS_THROTTLE_MS = 250;
 
+// Video player is vertically resizable — drag the divider below it up
+// to shrink the video and give the transcript more room. Persisted as
+// a pixel height; null = default 16:9 from the pane width.
+const VIDEO_HEIGHT_KEY = "ostinote_video_player_height";
+const MIN_VIDEO_H = 90;
+const MAX_VIDEO_H = 600;
+
 let ytApiLoading = false;
 let ytApiReady = !!window.YT?.Player;
 const ytApiCallbacks = [];
@@ -42,6 +49,42 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
   const [playing, setPlaying] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
   const pollRef = useRef(0);
+
+  // Resizable video height. null → default 16:9 from the pane width.
+  const [videoHeight, setVideoHeight] = useState(() => {
+    try {
+      const v = parseInt(localStorage.getItem(VIDEO_HEIGHT_KEY) || "", 10);
+      return Number.isFinite(v) ? v : null;
+    } catch { return null; }
+  });
+  const [resizingVideo, setResizingVideo] = useState(false);
+  useEffect(() => {
+    if (videoHeight != null) {
+      try { localStorage.setItem(VIDEO_HEIGHT_KEY, String(videoHeight)); } catch {}
+    }
+  }, [videoHeight]);
+
+  const beginVideoResize = (e) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = containerRef.current?.offsetHeight || 200;
+    setResizingVideo(true);
+    const onMove = (mv) => {
+      const next = Math.max(MIN_VIDEO_H, Math.min(MAX_VIDEO_H, startH + (mv.clientY - startY)));
+      setVideoHeight(next);
+    };
+    const onUp = () => {
+      setResizingVideo(false);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    document.body.style.cursor = "ns-resize";
+    document.body.style.userSelect = "none";
+  };
 
   // Word-level timing comes from YouTube's json3 / srv3 caption data
   // (perfect timing) when available. For pre-existing docs we
@@ -318,12 +361,44 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
       <div ref={containerRef} style={{
         width: "100%", background: "#000", flexShrink: 0,
-        position: "relative", paddingBottom: "56.25%",
+        position: "relative",
+        height: videoHeight != null ? videoHeight : undefined,
+        aspectRatio: videoHeight == null ? "16 / 9" : undefined,
+        minHeight: MIN_VIDEO_H,
       }}>
         <div className="yt-player-target" style={{
           position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
         }} />
       </div>
+
+      {/* Drag divider — pull up to shrink the video, freeing room for
+          the transcript. */}
+      <div
+        onMouseDown={beginVideoResize}
+        title="Drag to resize the video"
+        aria-label="Resize video"
+        style={{
+          height: 8, flexShrink: 0, cursor: "ns-resize",
+          position: "relative",
+          background: resizingVideo ? T.bgSub : T.card,
+          borderBottom: `1px solid ${T.border}`,
+          transition: "background 0.12s",
+        }}
+        onMouseEnter={e => { if (!resizingVideo) e.currentTarget.style.background = T.bgSub; }}
+        onMouseLeave={e => { if (!resizingVideo) e.currentTarget.style.background = T.card; }}
+      >
+        <div style={{
+          position: "absolute", left: "50%", top: "50%", transform: "translate(-50%, -50%)",
+          width: 34, height: 3, borderRadius: 2,
+          background: resizingVideo ? T.borderStrong : T.border,
+        }} />
+      </div>
+
+      {/* Full-viewport overlay during the drag so the YouTube iframe
+          can't swallow the mousemove events and stall the resize. */}
+      {resizingVideo && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 99999, cursor: "ns-resize", background: "transparent" }} />
+      )}
 
       <ParagraphTranscript
         T={T}
@@ -414,7 +489,7 @@ const ParagraphTranscript = memo(function ParagraphTranscript({
       onScroll={onScroll}
       style={{
         flex: 1, overflowY: "auto", minHeight: 0,
-        padding: "20px 22px",
+        padding: "24px 40px",
         fontFamily: T.fontBody, fontSize: 14, lineHeight: 1.85,
         color: T.textMid,
         userSelect: "text",
@@ -436,7 +511,7 @@ const ParagraphTranscript = memo(function ParagraphTranscript({
           background: var(--yt-word-active-bg);
         }
       `}</style>
-      <p style={{ margin: 0 }}>
+      <p style={{ margin: "0 auto", maxWidth: 680 }}>
         {tokens.map((t, i) => {
           if (t.type === "space") return <span key={i}>{t.text}</span>;
           const wIdx = wordIndexMap[i];
