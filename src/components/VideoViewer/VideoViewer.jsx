@@ -105,6 +105,12 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
   // Target scrollTop for the teleprompter follow. Set on word change;
   // the rAF tick eases the actual scrollTop toward it.
   const targetScrollRef = useRef(null);
+  // The scrollTop value WE last wrote programmatically. The scroll
+  // handler compares against it to tell our own auto-scroll apart from
+  // a real user scroll — without this, every eased frame fires a
+  // scroll event that the handler mistakes for the user grabbing the
+  // scrollbar, which kills the auto-follow after one frame.
+  const lastAutoScrollTopRef = useRef(-1);
 
   // Reset only the active-word marker when the doc / token set changes.
   useEffect(() => {
@@ -250,12 +256,14 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
       if (targetScrollRef.current != null && !userScrollRef.current && scrollRef.current) {
         const cont = scrollRef.current;
         const remaining = targetScrollRef.current - cont.scrollTop;
-        if (Math.abs(remaining) < 0.5) {
-          cont.scrollTop = targetScrollRef.current;
-          targetScrollRef.current = null;
-        } else {
-          cont.scrollTop += remaining * 0.18;
-        }
+        const next = Math.abs(remaining) < 0.5
+          ? targetScrollRef.current
+          : cont.scrollTop + remaining * 0.18;
+        cont.scrollTop = next;
+        // Record what we wrote so the scroll handler recognizes this
+        // as our own scroll and doesn't treat it as a user grab.
+        lastAutoScrollTopRef.current = cont.scrollTop;
+        if (Math.abs(remaining) < 0.5) targetScrollRef.current = null;
       }
       pollRef.current = requestAnimationFrame(tick);
     };
@@ -264,7 +272,13 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
   }, [playing, words, duration, onScrollProgress]);
 
   const handleScroll = useCallback(() => {
+    const cont = scrollRef.current;
+    // Ignore the scroll events our own auto-follow generates. If the
+    // current position matches the value we just wrote, it's us; only
+    // a mismatch means the user actually grabbed the scrollbar.
+    if (cont && Math.abs(cont.scrollTop - lastAutoScrollTopRef.current) < 2) return;
     userScrollRef.current = true;
+    targetScrollRef.current = null; // abandon any pending auto-scroll
     clearTimeout(userScrollTimerRef.current);
     userScrollTimerRef.current = setTimeout(() => { userScrollRef.current = false; }, AUTO_SCROLL_PAUSE_MS);
   }, []);
