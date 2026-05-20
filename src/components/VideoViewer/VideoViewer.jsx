@@ -215,12 +215,23 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
             const nextEl = wordElsRef.current[nextIdx];
             if (nextEl) {
               nextEl.classList.add("yt-word-active");
+              // Teleprompter scroll: keep the active word anchored at
+              // ~30% from the top of the transcript pane. Every word
+              // change nudges the container's scrollTop by the delta
+              // between where the word currently is and where we want
+              // it. The result is a smooth, continuous follow — the
+              // text feeds itself forward so the highlight never drifts
+              // toward the bottom edge.
               if (!userScrollRef.current && scrollRef.current) {
                 const cont = scrollRef.current;
                 const wRect = nextEl.getBoundingClientRect();
                 const cRect = cont.getBoundingClientRect();
-                if (wRect.top < cRect.top || wRect.bottom > cRect.bottom) {
-                  nextEl.scrollIntoView({ behavior: "auto", block: "nearest" });
+                const targetY = cRect.top + cRect.height * 0.3;
+                const delta = wRect.top - targetY;
+                // Threshold avoids sub-pixel jitter when the word is
+                // already at the anchor line.
+                if (Math.abs(delta) > 4) {
+                  cont.scrollTop += delta;
                 }
               }
             }
