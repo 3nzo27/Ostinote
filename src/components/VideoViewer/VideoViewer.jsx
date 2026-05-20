@@ -132,8 +132,6 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
     return () => clearInterval(pollRef.current);
   }, [playing, duration, onScrollProgress]);
 
-  const activeIdx = findActiveSegment(transcript, currentTime);
-
   const handleSeek = useCallback((offset) => {
     playerRef.current?.seekTo(offset, true);
   }, []);
@@ -171,10 +169,10 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
         }} />
       </div>
 
-      <TranscriptPane
+      <ParagraphTranscript
         T={T}
         transcript={transcript}
-        activeIdx={activeIdx}
+        currentTime={currentTime}
         onSeek={handleSeek}
       />
     </div>
@@ -183,28 +181,92 @@ const VideoViewer = forwardRef(function VideoViewer({ doc, onHighlight, onScroll
 
 export default VideoViewer;
 
-function findActiveSegment(transcript, time) {
-  if (!transcript.length) return -1;
-  let best = -1;
-  for (let i = 0; i < transcript.length; i++) {
-    const offset = transcript[i].offset ?? transcript[i].start ?? 0;
-    if (offset <= time) best = i;
-    else break;
+// Flatten the segment-level transcript into per-word tokens with
+// estimated start times. YouTube only gives us segment-level timing
+// (one offset + duration per ~1-10 word utterance), so we distribute
+// each segment's duration evenly across its words. Not literally
+// accurate but visually convincing for a karaoke-style read-along —
+// the highlight tracks the spoken cadence to within ~500ms.
+function tokenizeTranscript(transcript) {
+  const tokens = [];
+  for (let s = 0; s < transcript.length; s++) {
+    const seg = transcript[s];
+    const segOffset = seg.offset ?? seg.start ?? 0;
+    const segDuration = seg.duration ?? 0;
+    const parts = (seg.text || "").split(/(\s+)/);
+    // Words only (non-whitespace) drive timing; whitespace tokens are
+    // emitted between them as plain text.
+    const wordCount = parts.filter(p => /\S/.test(p)).length;
+    const perWord = wordCount > 0 ? segDuration / wordCount : 0;
+    let wordI = 0;
+    for (const part of parts) {
+      if (!part) continue;
+      if (/\S/.test(part)) {
+        const start = segOffset + wordI * perWord;
+        tokens.push({ type: "word", text: part, start });
+        wordI++;
+      } else {
+        tokens.push({ type: "space", text: part });
+      }
+    }
+    // Ensure visual separation between consecutive segments.
+    tokens.push({ type: "space", text: " " });
+  }
+  return tokens;
+}
+
+// Binary search for the largest word-token index whose start time is
+// at or before `time`. Linear scan would be fine at 1500 words but
+// this is what we'd want at any larger scale.
+function findActiveWordIdx(words, time) {
+  if (!words.length) return -1;
+  let lo = 0, hi = words.length - 1, best = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (words[mid].start <= time) { best = mid; lo = mid + 1; }
+    else hi = mid - 1;
   }
   return best;
 }
 
-const TranscriptPane = memo(function TranscriptPane({ T, transcript, activeIdx, onSeek }) {
+// Paragraph-style transcript with karaoke-style read-along highlight.
+// Past words read at full strength (T.text), the current word is lifted
+// with a subtle background tint, and upcoming words sit muted in
+// T.textLight so the eye naturally tracks forward. Click any word to
+// seek the video to that point.
+const ParagraphTranscript = memo(function ParagraphTranscript({ T, transcript, currentTime, onSeek }) {
   const scrollRef = useRef(null);
+  const activeWordRef = useRef(null);
   const userScrollRef = useRef(false);
   const timerRef = useRef(0);
 
+  // tokens contains both words (with start times) and whitespace; the
+  // wordIndexMap maps token index -> word-only index (used to find the
+  // active token after binary-searching words[]).
+  const { tokens, words, wordIndexMap } = useMemo(() => {
+    const tok = tokenizeTranscript(transcript || []);
+    const w = [];
+    const map = new Array(tok.length).fill(-1);
+    for (let i = 0; i < tok.length; i++) {
+      if (tok[i].type === "word") {
+        map[i] = w.length;
+        w.push(tok[i]);
+      }
+    }
+    return { tokens: tok, words: w, wordIndexMap: map };
+  }, [transcript]);
+
+  const activeWord = findActiveWordIdx(words, currentTime);
+
+  // Auto-scroll the active word into view, but only when the user
+  // hasn't recently scrolled themselves. block: "nearest" keeps the
+  // motion minimal — no scroll happens if the word is already on-screen.
   useEffect(() => {
     if (userScrollRef.current) return;
-    if (activeIdx < 0) return;
-    const el = scrollRef.current?.children?.[activeIdx];
+    if (activeWord < 0) return;
+    const el = activeWordRef.current;
     if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [activeIdx]);
+  }, [activeWord]);
 
   const handleScroll = useCallback(() => {
     userScrollRef.current = true;
@@ -229,43 +291,59 @@ const TranscriptPane = memo(function TranscriptPane({ T, transcript, activeIdx, 
       ref={scrollRef}
       onScroll={handleScroll}
       style={{
-        flex: 1, overflowY: "auto", padding: "8px 0", minHeight: 0,
+        flex: 1, overflowY: "auto", minHeight: 0,
+        padding: "20px 22px",
+        fontFamily: T.fontBody, fontSize: 14, lineHeight: 1.85,
+        color: T.textLight,
+        userSelect: "text",
       }}
     >
-      {transcript.map((seg, i) => {
-        const offset = seg.offset ?? seg.start ?? 0;
-        const isActive = i === activeIdx;
-        return (
-          <div
-            key={i}
-            data-timestamp={offset}
-            onClick={() => onSeek(offset)}
-            style={{
-              display: "flex", gap: 10, padding: "6px 14px",
-              cursor: "pointer", transition: "background 0.15s",
-              background: isActive ? (T.easy + "18") : "transparent",
-              borderLeft: isActive ? `3px solid ${T.hard || "#c47f2a"}` : "3px solid transparent",
-            }}
-            onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = T.bgSub; }}
-            onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "transparent"; }}
-          >
-            <span style={{
-              flexShrink: 0, width: 48, fontSize: 11, fontWeight: 600,
-              color: isActive ? T.hard || "#c47f2a" : T.textLight,
-              fontFamily: T.fontBody, paddingTop: 2,
-            }}>
-              {formatTimestamp(offset)}
-            </span>
-            <span style={{
-              fontSize: 13, lineHeight: 1.5, color: isActive ? T.text : T.textMid,
-              fontFamily: T.fontBody, userSelect: "text",
-            }}>
-              {seg.text}
-            </span>
-          </div>
-        );
-      })}
+      <p style={{ margin: 0 }}>
+        {tokens.map((t, i) => {
+          if (t.type === "space") {
+            return <span key={i}>{t.text}</span>;
+          }
+          const wIdx = wordIndexMap[i];
+          const isActive = wIdx === activeWord;
+          const isPast = wIdx < activeWord;
+          return (
+            <Word
+              key={i}
+              ref={isActive ? activeWordRef : null}
+              T={T}
+              text={t.text}
+              start={t.start}
+              isActive={isActive}
+              isPast={isPast}
+              onSeek={onSeek}
+            />
+          );
+        })}
+      </p>
       <div style={{ height: 80 }} />
     </div>
   );
 });
+
+// Memoized word span. Each tick only re-renders the small handful of
+// words whose isActive/isPast actually changed (memo's shallowEqual
+// skips the rest), so even multi-thousand-word transcripts stay smooth.
+const Word = memo(forwardRef(function Word({ T, text, start, isActive, isPast, onSeek }, ref) {
+  const color = isActive ? T.text : (isPast ? T.text : T.textLight);
+  return (
+    <span
+      ref={ref}
+      data-timestamp={start}
+      onClick={() => onSeek(start)}
+      style={{
+        color,
+        background: isActive ? `${T.easy}33` : "transparent",
+        padding: "0 1px",
+        borderRadius: 3,
+        cursor: "pointer",
+        fontWeight: isActive ? 600 : (isPast ? 500 : 400),
+        transition: "background 0.12s, color 0.12s",
+      }}
+    >{text}</span>
+  );
+}));
