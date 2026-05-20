@@ -388,17 +388,25 @@ const ParagraphTranscript = memo(function ParagraphTranscript({
         // Theme-driven active-word styling lives on a CSS-var so the
         // class toggled by the rAF loop picks up the current theme
         // automatically — no JS restyle needed on dark-mode toggle.
+        // Stronger background opacity (66 = 40%) compensates for the
+        // removed font-weight emphasis without triggering layout.
         "--yt-word-active-color": T.text,
-        "--yt-word-active-bg": `${T.easy}40`,
+        "--yt-word-active-bg": `${T.easy}66`,
       }}
     >
       {/* Scoped styles for the read-along highlight. Inlined here so
-          the rule lives with the only component that uses it. */}
+          the rule lives with the only component that uses it.
+          DO NOT change font-weight or any other layout-triggering
+          property on .yt-word-active — that forces a reflow of the
+          entire paragraph (10-30ms for a 1500-word transcript) on
+          EVERY word change, which is exactly what made the highlight
+          feel laggy. Color and background are paint-only and basically
+          free; we lean on a stronger background tint to make the
+          highlight clearly visible without touching layout. */}
       <style>{`
         #video-transcript-pane .yt-word.yt-word-active {
           color: var(--yt-word-active-color);
           background: var(--yt-word-active-bg);
-          font-weight: 700;
         }
       `}</style>
       <p style={{ margin: 0 }}>
