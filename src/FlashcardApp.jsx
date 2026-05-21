@@ -16,6 +16,8 @@ import DirectedStudyConfigView from "./views/DirectedStudyConfigView/DirectedStu
 import DirectedStudySessionView from "./views/DirectedStudySessionView/DirectedStudySessionView.jsx";
 import DirectedStudyResultsView from "./views/DirectedStudyResultsView/DirectedStudyResultsView.jsx";
 import SettingsView from "./views/SettingsView/SettingsView.jsx";
+import ScheduleView from "./views/ScheduleView/ScheduleView.jsx";
+import StatisticsView from "./views/StatisticsView/StatisticsView.jsx";
 import ProfileView from "./views/ProfileView/ProfileView.jsx";
 import DocumentsView from "./views/DocumentsView/DocumentsView.jsx";
 import DocumentReaderView from "./views/DocumentReaderView/DocumentReaderView.jsx";
@@ -684,6 +686,14 @@ Respond ONLY with valid JSON, no markdown backticks, in this exact format:
       onNavigate={onNavigate}
       onHelpOpen={openHelp}
     />;
+  }
+
+  if (view === "schedule") {
+    return <ScheduleView decks={decks} onNavigate={onNavigate} />;
+  }
+
+  if (view === "statistics") {
+    return <StatisticsView decks={decks} onNavigate={onNavigate} />;
   }
 
   if (view === "deck" && activeDeck) {

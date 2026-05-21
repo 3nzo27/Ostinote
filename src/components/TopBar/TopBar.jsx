@@ -19,9 +19,13 @@ const NAV_TABS = [
   { id: "dashboard",  label: "Dashboard" },
   { id: "workspace",  label: "Workspace" },
   { id: "decks",      label: "Flashcards" },
+  { id: "schedule",   label: "Schedule" },
+  { id: "statistics", label: "Statistics" },
 ];
 
-const BREAKPOINT = 540;
+// Five nav tabs + logo + right cluster need more room than the old
+// three did; collapse to the hamburger sooner so the tabs never cramp.
+const BREAKPOINT = 720;
 
 export default function TopBar({ view, onNavigate, onLogoClick, onOpenSettings, onOpenProfile }) {
   const { T, darkMode, setDarkMode } = useTheme();
