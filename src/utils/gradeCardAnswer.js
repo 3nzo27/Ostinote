@@ -29,11 +29,17 @@ function buildTagContext(tags) {
   return `\nCARD TAGS: ${tags.join(", ")}\nThese tags indicate what this card is testing. Adjust your grading accordingly:\n${lines.join("\n")}`;
 }
 
-function buildPrompt({ correctAnswer, studentAnswer, tags }) {
+const STRICTNESS_RULE = {
+  Lenient:  "GRADING STANCE: Be generous — reward partial understanding, give the benefit of the doubt on minor omissions, and lean toward the higher rating when it's borderline.",
+  Strict:   "GRADING STANCE: Be demanding — require precise, complete answers. Penalize missing specifics and vagueness, and lean toward the lower rating when it's borderline.",
+};
+
+function buildPrompt({ correctAnswer, studentAnswer, tags, strictness }) {
   const tagContext = buildTagContext(tags);
   const tagHint = tags?.length > 0
     ? ` Mention the tag-specific criteria you applied (e.g. "your spelling was accurate" or "the exact date was off — you said X").`
     : "";
+  const strictnessLine = STRICTNESS_RULE[strictness] ? `\n${STRICTNESS_RULE[strictness]}` : "";
   return `You are a warm, encouraging teacher grading a flashcard answer. Be honest about accuracy while always staying supportive and positive.
 
 CRITICAL VOICE: Address the user DIRECTLY using "you" / "your" in your explanation. Do NOT write "the student", "they", "the user", or any third-person reference — speak to them, not about them.
@@ -43,7 +49,7 @@ GRADING RULES:
 - Focus on meaning, completeness, and specificity.
 - Perfect should be RARE — reserve for full understanding matching the correct answer in meaning AND completeness.
 - Match the level of detail. A vague answer to a specific question rates lower.
-- Be fair but not generous.
+- Be fair but not generous.${strictnessLine}
 ${tagContext}
 
 CORRECT ANSWER: "${correctAnswer}"
@@ -63,13 +69,17 @@ Respond ONLY with valid JSON, no markdown backticks:
 {"rating": <number>, "label": "<Forgot|Hard|Good|Easy|Perfect>", "explanation": "<1-2 sentences>"}`;
 }
 
-export async function gradeCardAnswer({ card, guess, aiSettings }) {
+export async function gradeCardAnswer({ card, guess, aiSettings, strictness = "Balanced" }) {
   const correctAnswer = card.back?.text || "(drawing or audio — no text answer)";
   const tags = card.tags || [];
 
   // Deterministic short-circuit for clear-cut short factual answers.
-  const quick = quickGrade({ correctAnswer, studentAnswer: guess });
-  if (quick) return { ...quick, source: "quick" };
+  // Skipped under Strict grading so exact-but-incomplete answers still
+  // go through the model rather than auto-passing.
+  if (strictness !== "Strict") {
+    const quick = quickGrade({ correctAnswer, studentAnswer: guess });
+    if (quick) return { ...quick, source: "quick" };
+  }
 
   try {
     if (aiSettings?.useLocal) {
@@ -82,7 +92,7 @@ export async function gradeCardAnswer({ card, guess, aiSettings }) {
     if (aiSettings?.provider !== "claude-local" && !aiSettings?.apiKey) {
       throw new Error("No API key");
     }
-    const prompt = buildPrompt({ correctAnswer, studentAnswer: guess, tags });
+    const prompt = buildPrompt({ correctAnswer, studentAnswer: guess, tags, strictness });
     const parsed = await gradeAnswer(aiSettings, prompt);
     return { ...parsed, source: "cloud" };
   } catch (err) {

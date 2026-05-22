@@ -145,13 +145,38 @@ Respond ONLY with valid JSON in this exact format:
   return JSON.parse(match[0]);
 }
 
+// Difficulty guidance woven into the generation prompt.
+const DIFFICULTY_HINT = {
+  Easy: "Keep questions straightforward — direct recall of stated facts and definitions.",
+  Medium: "Balance recall with questions that require connecting two ideas.",
+  Hard: "Favor questions that demand synthesis, application to new situations, and reasoning across sections.",
+};
+
 // Generate a batch of flashcards covering the whole document or a section.
 // Returns Array<{ front, back, tags?, page? }>
-export async function generateFlashcardsFromDocument({ aiSettings, doc, count = 10 }) {
+//
+// Options beyond count let the Quiz tab fine-tune generation:
+//   difficulty     "Easy" | "Medium" | "Hard" | "Mixed"
+//   questionTypes  string[] e.g. ["Definitions","Concepts","Application","Recall"]
+//   focus          free-text topic to prioritize (optional)
+export async function generateFlashcardsFromDocument({
+  aiSettings, doc, count = 10, difficulty = "Mixed", questionTypes = [], focus = "",
+}) {
   // claude-local doesn't need a key — it uses the local CLI's OAuth login.
   if (aiSettings?.provider !== "claude-local" && !aiSettings?.apiKey) {
     throw new Error("No API key configured");
   }
+
+  const difficultyLine = difficulty && difficulty !== "Mixed" && DIFFICULTY_HINT[difficulty]
+    ? `- Target difficulty: ${difficulty}. ${DIFFICULTY_HINT[difficulty]}`
+    : "- Mix easy, medium, and hard questions.";
+  const typesLine = (questionTypes && questionTypes.length)
+    ? `- Emphasize these question types: ${questionTypes.join(", ")}.`
+    : "- Mix definition / concept / application questions.";
+  const focusLine = (focus && focus.trim())
+    ? `- Focus specifically on: "${focus.trim()}". Prioritize material related to this and skip unrelated sections.\n`
+    : "";
+
   const prompt = `You are creating high-quality flashcards from a document for spaced repetition study.
 
 Document: "${doc.title}"
@@ -159,8 +184,9 @@ ${docText(doc)}
 
 Generate ${count} flashcards covering the most important concepts. Rules:
 - Each flashcard should test active recall — NOT verbatim copy-paste.
-- Mix definition / concept / application questions.
-- Distribute cards across the document (don't cluster on the first few pages).
+${difficultyLine}
+${typesLine}
+${focusLine}- Distribute cards across the document (don't cluster on the first few pages).
 - Include the page number where each card's information appears.
 - Include 1-2 short tags per card.
 

@@ -14,7 +14,7 @@
 // back to string front/back when handed to onAddCardToDeck (which
 // re-wraps them — see FlashcardApp.addCardToDeck).
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import useTheme from "../../theme/useTheme.js";
 import StudyView from "../../views/StudyView/StudyView.jsx";
 import DeckPickerModal from "./DeckPickerModal.jsx";
@@ -29,13 +29,35 @@ const RATING_META = {
   5: { label: "Perfect", colorKey: "perfect", bgKey: "perfectBg" },
 };
 const COUNT_OPTIONS = [5, 10, 15, 20];
+const DIFFICULTIES = ["Easy", "Medium", "Hard", "Mixed"];
+const QUESTION_TYPES = ["Definitions", "Concepts", "Application", "Recall"];
+const STRICTNESS = ["Lenient", "Balanced", "Strict"];
+const SETTINGS_KEY = "ostinote_quiz_settings";
+
+function loadSettings() {
+  try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"); }
+  catch { return {}; }
+}
 
 export default function QuizTab({ doc, aiSettings, decks, onAddCardToDeck }) {
   const { T } = useTheme();
   const [mode, setMode] = useState("intro");      // intro | quizzing | review
-  const [count, setCount] = useState(10);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  // ---- Quiz generation settings (persisted) ----
+  const [count, setCount] = useState(() => loadSettings().count ?? 10);
+  const [difficulty, setDifficulty] = useState(() => loadSettings().difficulty ?? "Mixed");
+  const [questionTypes, setQuestionTypes] = useState(() => loadSettings().questionTypes ?? ["Definitions", "Concepts", "Application"]);
+  const [strictness, setStrictness] = useState(() => loadSettings().strictness ?? "Balanced");
+  const [focus, setFocus] = useState(() => loadSettings().focus ?? "");
+  useEffect(() => {
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ count, difficulty, questionTypes, strictness, focus }));
+    } catch {}
+  }, [count, difficulty, questionTypes, strictness, focus]);
+  const toggleType = (t) =>
+    setQuestionTypes(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]);
 
   // The generated quiz cards (in StudyView's {text} shape).
   const [cards, setCards] = useState([]);
@@ -68,7 +90,9 @@ export default function QuizTab({ doc, aiSettings, decks, onAddCardToDeck }) {
     setLoading(true);
     setError(null);
     try {
-      const raw = await generateFlashcardsFromDocument({ aiSettings, doc, count });
+      const raw = await generateFlashcardsFromDocument({
+        aiSettings, doc, count, difficulty, questionTypes, focus,
+      });
       if (!raw.length) throw new Error("No questions came back — try again.");
       const formatted = raw.map((c, i) => ({
         id: `quiz-${Date.now()}-${i}`,
@@ -99,7 +123,7 @@ export default function QuizTab({ doc, aiSettings, decks, onAddCardToDeck }) {
     setFlipped(true);
     setAiLoading(true);
     setAiResult(null);
-    const result = await gradeCardAnswer({ card, guess, aiSettings });
+    const result = await gradeCardAnswer({ card, guess, aiSettings, strictness });
     setAiResult(result);
     setAiLoading(false);
   };
@@ -241,28 +265,55 @@ export default function QuizTab({ doc, aiSettings, decks, onAddCardToDeck }) {
         the questions before saving them to a deck.
       </p>
 
-      <div style={{ fontSize: 11, fontWeight: 600, color: T.textMid, marginBottom: 8 }}>
-        Number of questions
-      </div>
-      <div style={{ display: "flex", gap: 6, marginBottom: 18 }}>
-        {COUNT_OPTIONS.map(n => {
-          const active = count === n;
-          return (
-            <button
-              key={n}
-              onClick={() => setCount(n)}
-              style={{
-                flex: 1, padding: "8px 0", borderRadius: 8,
-                border: active ? `1.5px solid ${T.borderStrong}` : `1.5px solid ${T.border}`,
-                background: active ? T.bgSub : T.card,
-                color: active ? T.text : T.textMid,
-                fontSize: 13, fontWeight: 600, fontFamily: T.fontBody, cursor: "pointer",
-                transition: "all 0.15s",
-              }}
-            >{n}</button>
-          );
-        })}
-      </div>
+      <Field T={T} label="Number of questions">
+        <Segmented T={T} options={COUNT_OPTIONS} value={count} onChange={setCount} />
+      </Field>
+
+      <Field T={T} label="Difficulty">
+        <Segmented T={T} options={DIFFICULTIES} value={difficulty} onChange={setDifficulty} />
+      </Field>
+
+      <Field T={T} label="Question types">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {QUESTION_TYPES.map(t => {
+            const active = questionTypes.includes(t);
+            return (
+              <button
+                key={t}
+                onClick={() => toggleType(t)}
+                style={{
+                  padding: "6px 12px", borderRadius: 999,
+                  border: active ? `1.5px solid ${T.borderStrong}` : `1.5px solid ${T.border}`,
+                  background: active ? T.bgSub : T.card,
+                  color: active ? T.text : T.textMid,
+                  fontSize: 12, fontWeight: 600, fontFamily: T.fontBody, cursor: "pointer",
+                  transition: "all 0.15s",
+                }}
+              >{t}</button>
+            );
+          })}
+        </div>
+      </Field>
+
+      <Field T={T} label="Grading strictness">
+        <Segmented T={T} options={STRICTNESS} value={strictness} onChange={setStrictness} />
+      </Field>
+
+      <Field T={T} label="Focus (optional)">
+        <input
+          value={focus}
+          onChange={e => setFocus(e.target.value)}
+          placeholder="e.g. chapter 3, photosynthesis…"
+          style={{
+            width: "100%", padding: "8px 10px", fontSize: 12.5,
+            borderRadius: 8, border: `1.5px solid ${T.border}`,
+            background: T.inputBg, color: T.text, fontFamily: T.fontBody,
+            outline: "none", boxSizing: "border-box",
+          }}
+          onFocus={e => e.target.style.borderColor = T.borderStrong}
+          onBlur={e => e.target.style.borderColor = T.border}
+        />
+      </Field>
 
       <button
         onClick={handleGenerate}
@@ -299,6 +350,39 @@ export default function QuizTab({ doc, aiSettings, decks, onAddCardToDeck }) {
 }
 
 // ---- subcomponents ----
+
+function Field({ T, label, children }) {
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ fontSize: 11, fontWeight: 600, color: T.textMid, marginBottom: 8 }}>{label}</div>
+      {children}
+    </div>
+  );
+}
+
+function Segmented({ T, options, value, onChange }) {
+  return (
+    <div style={{ display: "flex", gap: 6 }}>
+      {options.map(o => {
+        const active = value === o;
+        return (
+          <button
+            key={String(o)}
+            onClick={() => onChange(o)}
+            style={{
+              flex: 1, padding: "8px 0", borderRadius: 8,
+              border: active ? `1.5px solid ${T.borderStrong}` : `1.5px solid ${T.border}`,
+              background: active ? T.bgSub : T.card,
+              color: active ? T.text : T.textMid,
+              fontSize: 12.5, fontWeight: 600, fontFamily: T.fontBody, cursor: "pointer",
+              transition: "all 0.15s", whiteSpace: "nowrap",
+            }}
+          >{o}</button>
+        );
+      })}
+    </div>
+  );
+}
 
 function QuizHeader({ T, title, onBack, backLabel = "Back" }) {
   return (
