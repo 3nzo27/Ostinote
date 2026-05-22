@@ -670,6 +670,7 @@ Respond ONLY with valid JSON, no markdown backticks, in this exact format:
       deleteDeck={deleteDeck}
       onSelectDeck={onSelectDeck} onNavigate={onNavigate}
       onHelpOpen={openHelp}
+      startShuffleStudy={startShuffleStudy}
     />;
   }
 

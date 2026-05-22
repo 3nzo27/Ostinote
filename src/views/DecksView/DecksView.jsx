@@ -6,6 +6,7 @@ import DeleteConfirmModal from "../../components/DeleteConfirmModal/DeleteConfir
 export default function DecksView({
   decks, newDeckName, setNewDeckName, showNewDeck, setShowNewDeck, addDeck,
   confirmDeleteId, setConfirmDeleteId, deleteDeck, onSelectDeck, onNavigate, onHelpOpen,
+  startShuffleStudy,
 }) {
   const { T } = useTheme();
   // Wider page (1080px) so the deck list fills meaningful space rather
@@ -15,44 +16,34 @@ export default function DecksView({
 
   const isEmpty = decks.length === 0 && !showNewDeck;
 
+  // Cross-deck due totals drive the "Today" hero.
+  const now = Date.now();
+  const totalDue = decks.reduce((s, d) => s + d.cards.filter(c => c.nextReview <= now).length, 0);
+  const decksWithDue = decks.filter(d => d.cards.some(c => c.nextReview <= now)).length;
+
   return (
     <div style={{ minHeight: "100vh", background: T.bg, display: "flex", flexDirection: "column" }}>
       <TopBar view="decks" onNavigate={onNavigate} />
       <div style={containerStyle}>
 
-        {/* Page header — "All Decks" on the left, Focus Study CTA on
-            the right. Focus Study moves out of the in-page tab and
-            becomes a single header action that navigates to the
-            dedicated config route. */}
-        <div style={{
-          display: "flex", alignItems: "center", gap: 12,
-          marginBottom: 16, flexWrap: "wrap",
-        }}>
-          <h2 style={{
-            flex: 1, fontSize: 22, fontWeight: 700,
-            color: T.text, fontFamily: T.fontBody, margin: 0,
-          }}>All Decks</h2>
-          {decks.length > 0 && (
-            <button
-              onClick={() => onNavigate("directed")}
-              style={{
-                display: "inline-flex", alignItems: "center", gap: 6,
-                padding: "7px 14px", borderRadius: T.radius,
-                border: `1.5px solid ${T.border}`, background: T.card,
-                color: T.textMid, fontSize: 13, fontWeight: 600,
-                fontFamily: T.fontBody, cursor: "pointer",
-                transition: "border-color 0.15s, color 0.15s, background 0.15s",
-              }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.color = T.text; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.color = T.textMid; }}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-              </svg>
-              Focus Study
-            </button>
-          )}
-        </div>
+        {/* "Today" hero — leads with what to study right now across all
+            decks. Primary action runs a shuffled all-due session; Focus
+            Study sits beside it as the secondary path. Hidden until the
+            user has at least one deck. */}
+        {decks.length > 0 && (
+          <TodayHero
+            T={T}
+            totalDue={totalDue}
+            decksWithDue={decksWithDue}
+            onStudyAll={() => startShuffleStudy?.()}
+            onFocusStudy={() => onNavigate("directed")}
+          />
+        )}
+
+        <h2 style={{
+          fontSize: 22, fontWeight: 700,
+          color: T.text, fontFamily: T.fontBody, margin: "0 0 16px",
+        }}>All Decks</h2>
 
         {isEmpty ? (
           <div style={{
@@ -131,6 +122,94 @@ export default function DecksView({
           />
         )}
       </div>{/* /containerStyle */}
+    </div>
+  );
+}
+
+// "Today" hero — the daily-driver focal point of the Flashcards page.
+// When cards are due it leads with the count + a one-tap shuffled
+// all-due session; when caught up it switches to a calm done state.
+// Focus Study is the secondary action in both states.
+function TodayHero({ T, totalDue, decksWithDue, onStudyAll, onFocusStudy }) {
+  const caughtUp = totalDue === 0;
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap",
+      padding: "22px 24px", marginBottom: 24,
+      borderRadius: T.radiusLg,
+      background: caughtUp ? T.card : T.cardAlt,
+      border: `1px solid ${caughtUp ? T.border : T.borderStrong}`,
+      boxShadow: T.shadow1,
+    }}>
+      <div style={{
+        width: 52, height: 52, borderRadius: 14, flexShrink: 0,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        background: caughtUp ? T.doneBg : T.dueBg,
+        color: caughtUp ? T.done : T.due,
+      }}>
+        {caughtUp ? (
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" />
+          </svg>
+        ) : (
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 0 1-3.46 0" />
+          </svg>
+        )}
+      </div>
+
+      <div style={{ flex: 1, minWidth: 180 }}>
+        <div style={{ fontSize: 22, fontWeight: 700, color: T.text, fontFamily: T.font, lineHeight: 1.2 }}>
+          {caughtUp
+            ? "You're all caught up"
+            : `${totalDue} card${totalDue === 1 ? "" : "s"} due`}
+        </div>
+        <div style={{ fontSize: 13.5, color: T.textMid, marginTop: 4 }}>
+          {caughtUp
+            ? "Nothing due right now — come back later, or run a focused session."
+            : `across ${decksWithDue} deck${decksWithDue === 1 ? "" : "s"}`}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
+        {!caughtUp && (
+          <button
+            onClick={onStudyAll}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 8,
+              padding: "11px 20px", borderRadius: T.radius, border: "none",
+              background: T.accent, color: T.white,
+              fontSize: 14, fontWeight: 600, fontFamily: T.fontBody, cursor: "pointer",
+              boxShadow: "0 2px 8px rgba(44,42,37,0.2)", transition: "transform 0.12s",
+            }}
+            onMouseEnter={e => e.currentTarget.style.transform = "translateY(-1px)"}
+            onMouseLeave={e => e.currentTarget.style.transform = ""}
+          >
+            Study all due
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
+            </svg>
+          </button>
+        )}
+        <button
+          onClick={onFocusStudy}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 6,
+            padding: "11px 18px", borderRadius: T.radius,
+            border: `1.5px solid ${T.border}`, background: T.card,
+            color: T.textMid, fontSize: 14, fontWeight: 600,
+            fontFamily: T.fontBody, cursor: "pointer",
+            transition: "border-color 0.15s, color 0.15s",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.color = T.text; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.color = T.textMid; }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+          </svg>
+          Focus Study
+        </button>
+      </div>
     </div>
   );
 }
