@@ -59,6 +59,55 @@ export default function QuizTab({ doc, aiSettings, decks, onAddCardToDeck }) {
   const toggleType = (t) =>
     setQuestionTypes(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]);
 
+  // Which settings row is expanded (hover-driven, like Focus Study).
+  const [expandedRow, setExpandedRow] = useState(null);
+
+  // ---- Focus-Study-style row + pill helpers ----
+  const optionBtn = (active, label, onClick) => (
+    <button key={label} onClick={onClick} style={{
+      padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${active ? T.text : T.border}`,
+      background: active ? T.text : T.white, color: active ? T.card : T.textMid,
+      fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: T.fontBody,
+      transition: "all 0.15s",
+    }}>{label}</button>
+  );
+  const settingRow = (id, label, summary, content) => {
+    const isExpanded = expandedRow === id;
+    return (
+      <div
+        key={id}
+        aria-expanded={isExpanded}
+        onMouseEnter={() => setExpandedRow(id)}
+        onMouseLeave={() => setExpandedRow(null)}
+        style={{
+          padding: isExpanded ? "18px 16px" : "13px 16px",
+          transition: "all 0.35s ease", cursor: "default",
+          background: isExpanded ? T.bgSub : "transparent",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: T.text, fontFamily: T.fontBody, flexShrink: 0 }}>{label}</span>
+          <span style={{
+            fontSize: 12, color: isExpanded ? T.textMid : T.textLight, fontFamily: T.fontBody,
+            transition: "color 0.35s ease", textAlign: "right",
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>{summary}</span>
+        </div>
+        <div style={{
+          maxHeight: isExpanded ? 200 : 0, opacity: isExpanded ? 1 : 0, overflow: "hidden",
+          transition: "all 0.45s cubic-bezier(0.4,0,0.2,1)", marginTop: isExpanded ? 12 : 0,
+        }}>
+          {content}
+        </div>
+      </div>
+    );
+  };
+  const rowInputStyle = {
+    width: "100%", padding: "6px 10px", borderRadius: T.radius, border: `1.5px solid ${T.border}`,
+    fontSize: 12, fontFamily: T.fontBody, color: T.text, outline: "none", background: T.inputBg,
+    boxSizing: "border-box",
+  };
+
   // The generated quiz cards (in StudyView's {text} shape).
   const [cards, setCards] = useState([]);
   // Per-card quiz result keyed by card id → rating number.
@@ -250,85 +299,77 @@ export default function QuizTab({ doc, aiSettings, decks, onAddCardToDeck }) {
   }
 
   // intro
+  const typesSummary = questionTypes.length === 0 ? "Any" : questionTypes.join(", ");
+  const focusSummary = focus.trim() ? focus.trim() : "Whole document";
+  const startDisabled = !hasApiKey || loading;
+
   return (
     <div style={{ flex: 1, overflowY: "auto", padding: "14px", fontFamily: T.fontBody }}>
-      <div style={{
-        fontSize: 11, fontWeight: 600, color: T.textMid,
-        textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 12,
-      }}>
-        Quiz yourself on this document
-      </div>
-
-      <p style={{ fontSize: 12.5, color: T.textMid, lineHeight: 1.55, marginBottom: 16 }}>
-        Generates questions from the document and quizzes you just like a study
-        session — type your answer, get graded, self-rate. Afterward you can edit
-        the questions before saving them to a deck.
+      <h2 style={{ fontSize: 17, fontWeight: 700, color: T.text, fontFamily: T.fontBody, margin: "0 0 2px" }}>
+        Quiz
+      </h2>
+      <p style={{ fontSize: 12.5, color: T.textMid, lineHeight: 1.5, margin: "0 0 16px" }}>
+        Set up your quiz, then test yourself like a study session.
       </p>
 
-      <Field T={T} label="Number of questions">
-        <Segmented T={T} options={COUNT_OPTIONS} value={count} onChange={setCount} />
-      </Field>
+      {/* Settings panel — Focus-Study-style hover-expand rows. */}
+      <div style={{
+        borderRadius: T.radiusLg, background: T.card,
+        border: `1px solid ${T.borderStrong}`, boxShadow: T.shadow2, overflow: "hidden",
+      }}>
+        {settingRow("count", "Questions", String(count),
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {COUNT_OPTIONS.map(n => optionBtn(count === n, String(n), () => setCount(n)))}
+          </div>
+        )}
+        {settingRow("difficulty", "Difficulty", difficulty,
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {DIFFICULTIES.map(d => optionBtn(difficulty === d, d, () => setDifficulty(d)))}
+          </div>
+        )}
+        {settingRow("types", "Question types", typesSummary,
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {QUESTION_TYPES.map(t => optionBtn(questionTypes.includes(t), t, () => toggleType(t)))}
+          </div>
+        )}
+        {settingRow("grading", "Grading", strictness,
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {STRICTNESS.map(s => optionBtn(strictness === s, s, () => setStrictness(s)))}
+          </div>
+        )}
+        {settingRow("focus", "Focus", focusSummary,
+          <input
+            value={focus}
+            onChange={e => setFocus(e.target.value)}
+            onClick={e => e.stopPropagation()}
+            placeholder="e.g. chapter 3, photosynthesis…"
+            style={rowInputStyle}
+            onFocus={e => e.target.style.borderColor = T.borderStrong}
+            onBlur={e => e.target.style.borderColor = T.border}
+          />
+        )}
+      </div>
 
-      <Field T={T} label="Difficulty">
-        <Segmented T={T} options={DIFFICULTIES} value={difficulty} onChange={setDifficulty} />
-      </Field>
-
-      <Field T={T} label="Question types">
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {QUESTION_TYPES.map(t => {
-            const active = questionTypes.includes(t);
-            return (
-              <button
-                key={t}
-                onClick={() => toggleType(t)}
-                style={{
-                  padding: "6px 12px", borderRadius: 999,
-                  border: active ? `1.5px solid ${T.borderStrong}` : `1.5px solid ${T.border}`,
-                  background: active ? T.bgSub : T.card,
-                  color: active ? T.text : T.textMid,
-                  fontSize: 12, fontWeight: 600, fontFamily: T.fontBody, cursor: "pointer",
-                  transition: "all 0.15s",
-                }}
-              >{t}</button>
-            );
-          })}
-        </div>
-      </Field>
-
-      <Field T={T} label="Grading strictness">
-        <Segmented T={T} options={STRICTNESS} value={strictness} onChange={setStrictness} />
-      </Field>
-
-      <Field T={T} label="Focus (optional)">
-        <input
-          value={focus}
-          onChange={e => setFocus(e.target.value)}
-          placeholder="e.g. chapter 3, photosynthesis…"
+      {/* Begin CTA — echoes Focus Study's "Begin Study" button. */}
+      <div style={{ textAlign: "center", padding: "16px 0 0" }}>
+        <button
+          onClick={handleGenerate}
+          disabled={startDisabled}
           style={{
-            width: "100%", padding: "8px 10px", fontSize: 12.5,
-            borderRadius: 8, border: `1.5px solid ${T.border}`,
-            background: T.inputBg, color: T.text, fontFamily: T.fontBody,
-            outline: "none", boxSizing: "border-box",
+            width: "100%", padding: "13px", borderRadius: T.radius, border: "none",
+            background: startDisabled ? T.bgSub : T.done,
+            color: startDisabled ? T.textLight : "#fff",
+            fontSize: 14, fontWeight: 700, fontFamily: T.fontBody,
+            cursor: startDisabled ? "default" : "pointer",
+            boxShadow: startDisabled ? "none" : "0 3px 12px rgba(58,125,92,0.3)",
+            transition: "transform 0.15s",
           }}
-          onFocus={e => e.target.style.borderColor = T.borderStrong}
-          onBlur={e => e.target.style.borderColor = T.border}
-        />
-      </Field>
-
-      <button
-        onClick={handleGenerate}
-        disabled={!hasApiKey || loading}
-        style={{
-          width: "100%", padding: "11px", borderRadius: 10, border: "none",
-          background: (!hasApiKey || loading) ? T.bgSub : T.text,
-          color: (!hasApiKey || loading) ? T.textLight : T.card,
-          fontSize: 13, fontWeight: 600, fontFamily: T.fontBody,
-          cursor: (!hasApiKey || loading) ? "default" : "pointer",
-          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-        }}
-      >
-        {loading ? "Generating quiz…" : `Start ${count}-question quiz`}
-      </button>
+          onMouseEnter={e => { if (!startDisabled) e.currentTarget.style.transform = "translateY(-1px)"; }}
+          onMouseLeave={e => { e.currentTarget.style.transform = ""; }}
+        >
+          {loading ? "Generating quiz…" : `Start ${count}-question quiz`}
+        </button>
+      </div>
 
       {!hasApiKey && (
         <div style={{
@@ -350,39 +391,6 @@ export default function QuizTab({ doc, aiSettings, decks, onAddCardToDeck }) {
 }
 
 // ---- subcomponents ----
-
-function Field({ T, label, children }) {
-  return (
-    <div style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: T.textMid, marginBottom: 8 }}>{label}</div>
-      {children}
-    </div>
-  );
-}
-
-function Segmented({ T, options, value, onChange }) {
-  return (
-    <div style={{ display: "flex", gap: 6 }}>
-      {options.map(o => {
-        const active = value === o;
-        return (
-          <button
-            key={String(o)}
-            onClick={() => onChange(o)}
-            style={{
-              flex: 1, padding: "8px 0", borderRadius: 8,
-              border: active ? `1.5px solid ${T.borderStrong}` : `1.5px solid ${T.border}`,
-              background: active ? T.bgSub : T.card,
-              color: active ? T.text : T.textMid,
-              fontSize: 12.5, fontWeight: 600, fontFamily: T.fontBody, cursor: "pointer",
-              transition: "all 0.15s", whiteSpace: "nowrap",
-            }}
-          >{o}</button>
-        );
-      })}
-    </div>
-  );
-}
 
 function QuizHeader({ T, title, onBack, backLabel = "Back" }) {
   return (
