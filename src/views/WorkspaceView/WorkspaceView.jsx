@@ -168,7 +168,16 @@ export default function WorkspaceView({
   const [loadedDocs, setLoadedDocs] = useState({});
   const [pdfBuffers, setPdfBuffers] = useState({});
   const [highlights, setHighlights] = useState([]);
-  const [progress, setProgress] = useState(0);
+  // Reader scroll progress is written straight to the DOM via a ref —
+  // NOT React state. Scroll fires ~60x/sec; routing it through state
+  // would re-render all of WorkspaceView (and the un-memoized Library/
+  // Tool Bar sidebars) on every frame, which got heavier the more
+  // docs/decks accumulated. A direct style.width write is ~free.
+  const progressBarRef = useRef(null);
+  const updateProgress = useCallback((p) => {
+    const el = progressBarRef.current;
+    if (el) el.style.width = `${Math.max(0, Math.min(1, p || 0)) * 100}%`;
+  }, []);
   const [selectionPopover, setSelectionPopover] = useState(null);
   const [ytUrlModal, setYtUrlModal] = useState(false);
   const readerRef = useRef(null);
@@ -293,12 +302,12 @@ export default function WorkspaceView({
     if (!el) return;
     const onScroll = () => {
       const max = el.scrollHeight - el.clientHeight;
-      setProgress(max > 0 ? Math.min(el.scrollTop / max, 1) : 0);
+      updateProgress(max > 0 ? el.scrollTop / max : 0);
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     onScroll();
     return () => el.removeEventListener("scroll", onScroll);
-  }, [activeDoc]);
+  }, [activeDoc, updateProgress]);
 
   // Text selection → floating "Highlight" button (Markdown view only).
   // PDF view handles selection via PdfViewer's onHighlight callback.
@@ -671,8 +680,8 @@ export default function WorkspaceView({
                   position: "absolute", bottom: 0, left: 0, right: 0,
                   height: 2, pointerEvents: "none", zIndex: 3,
                 }}>
-                  <div style={{
-                    width: `${(progress || 0) * 100}%`, height: "100%",
+                  <div ref={progressBarRef} style={{
+                    width: "0%", height: "100%",
                     background: T.good, transition: "width 0.1s ease",
                   }} />
                 </div>
@@ -684,7 +693,7 @@ export default function WorkspaceView({
                       ref={videoRef}
                       doc={activeDoc}
                       onHighlight={(sel) => setSelectionPopover(sel)}
-                      onScrollProgress={setProgress}
+                      onScrollProgress={updateProgress}
                     />
                   ) : activeDoc.hasPdf ? (
                     pdfBuffers[activeDoc.id] ? (
@@ -694,7 +703,7 @@ export default function WorkspaceView({
                         buffer={pdfBuffers[activeDoc.id]}
                         highlights={highlights}
                         onHighlight={(sel) => setSelectionPopover(sel)}
-                        onScrollProgress={setProgress}
+                        onScrollProgress={updateProgress}
                       />
                     ) : (
                       <div style={{
