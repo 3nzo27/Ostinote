@@ -1,6 +1,7 @@
 // YouTube transcript utilities.
-// Fetches captions via server-side proxy (Vite plugin or Electron bridge)
-// since YouTube blocks CORS from browsers.
+// Fetches captions via the Vite dev server's /_yt proxy (YouTube blocks
+// direct browser fetches with CORS). Dev-only — a deployed website needs
+// a serverless proxy for these endpoints.
 
 const YT_URL_PATTERNS = [
   /(?:youtube\.com\/watch\?.*v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([A-Za-z0-9_-]{11})/,
@@ -22,21 +23,16 @@ export function parseYouTubeUrl(url) {
 }
 
 export async function fetchTranscript(videoId) {
-  let raw;
-  if (window.ostinoteYT?.getTranscript) {
-    raw = await window.ostinoteYT.getTranscript({ videoId });
-  } else {
-    const res = await fetch("/_yt/transcript", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ videoId }),
-    });
-    if (!res.ok) {
-      const msg = await res.text().catch(() => "Unknown error");
-      throw new Error(msg || "Failed to fetch transcript");
-    }
-    raw = await res.json();
+  const res = await fetch("/_yt/transcript", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ videoId }),
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => "Unknown error");
+    throw new Error(msg || "Failed to fetch transcript");
   }
+  const raw = await res.json();
   return raw.map(s => ({
     text: s.text,
     offset: (s.offset ?? 0) / 1000,
@@ -44,17 +40,16 @@ export async function fetchTranscript(videoId) {
   }));
 }
 
-// Fetches YouTube's word-level caption timing (json3 format). Returns
-// a flat array of { text, start } where start is in seconds. Falls
-// back through the Electron bridge → Vite dev plugin → throws.
+// Fetches YouTube's word-level caption timing (json3 format) via the
+// Vite dev server's /_yt proxy (YouTube blocks direct browser fetches
+// with CORS, so a same-origin proxy is required). Returns a flat array
+// of { text, start } in seconds — the same data YouTube uses to render
+// captions, millisecond-accurate per word.
 //
-// This is the perfect timing source — it's the same data YouTube uses
-// to render captions, with millisecond accuracy per word for auto-
-// generated captions. No estimation, no interpolation needed.
+// NOTE: the /_yt endpoints only exist under `npm run dev`. On a deployed
+// website these throw; YouTube features need a serverless proxy to work
+// in production.
 export async function fetchWordTimings(videoId) {
-  if (window.ostinoteYT?.getWordTimings) {
-    return window.ostinoteYT.getWordTimings({ videoId });
-  }
   const res = await fetch("/_yt/word-timings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -68,9 +63,6 @@ export async function fetchWordTimings(videoId) {
 }
 
 export async function fetchVideoInfo(videoId) {
-  if (window.ostinoteYT?.getVideoInfo) {
-    return window.ostinoteYT.getVideoInfo({ videoId });
-  }
   const res = await fetch(`/_yt/video-info?v=${encodeURIComponent(videoId)}`);
   if (!res.ok) return { title: null };
   return res.json();

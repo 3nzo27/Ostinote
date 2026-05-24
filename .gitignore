@@ -15,3 +15,6 @@ ios/App/Podfile.lock
 android/.gradle
 android/local.properties
 android/app/build
+
+# Local agent worktrees
+.claude/worktrees/

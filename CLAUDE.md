@@ -1,8 +1,16 @@
 # CLAUDE.md — Ostinote project handoff
 
-You are continuing work on Ostinote, a React + Vite + Electron desktop study
-app. PDF reader → AI chat → flashcard SRS. Everything is client-side
-(IndexedDB + localStorage). No backend.
+You are continuing work on Ostinote, a React + Vite **web app** (pure
+website — no desktop/mobile packaging). PDF reader → AI chat → flashcard
+SRS. Everything is client-side (IndexedDB + localStorage). No backend.
+
+> Scope note: Ostinote was previously also packaged as an Electron
+> desktop app and a Capacitor iOS/Android app. Those were removed — it
+> now ships purely as a website. Do NOT re-introduce Electron, Capacitor,
+> or native packaging. The `claude-local` AI provider and YouTube
+> transcript fetching depend on the Vite dev server's `/_ai` + `/_yt`
+> endpoints, so they only work under `npm run dev`; a deployed site would
+> need a serverless proxy for those (cloud API providers work everywhere).
 
 ## Source map
 
@@ -15,9 +23,9 @@ app. PDF reader → AI chat → flashcard SRS. Everything is client-side
 - `src/utils/` — non-React helpers (sm2, pdfConverter, aiGrader,
   gradeCardAnswer, quickGrade, documentAi, documentStore, firestoreSync,
   webllm).
-- `electron/main.cjs` + `electron/preload.cjs` — Electron shell + AI bridge.
-- `vite-plugin-claude-bridge.js` — Vite dev `/_ai/*` endpoints (mirrors
-  the Electron bridge for browser dev).
+- `vite-plugin-claude-bridge.js` — Vite **dev-only** server endpoints:
+  `/_ai/*` (proxies the local `claude` CLI) and `/_yt/*` (proxies YouTube
+  caption/transcript fetches, which CORS blocks from the browser).
 
 ## View router (FlashcardApp.jsx)
 
@@ -156,9 +164,10 @@ a scroll container, the wrapper needs enough bottom padding or it must
 
 Five providers in `src/utils/aiGrader.js` (`PROVIDERS` object):
 - `anthropic`, `openai`, `google` — need an API key
-- `claude-local` — keyless. Uses the local `claude` CLI:
-  - In Electron build: via `window.ostinoteAI.complete()` (preload bridge → ipc → spawn `claude --print` in main.cjs).
-  - In browser dev: via `fetch("/_ai/complete")` (vite-plugin-claude-bridge handles spawn).
+- `claude-local` — keyless, **local-dev only**. `fetch("/_ai/complete")`
+  hits the vite-plugin-claude-bridge dev endpoint, which spawns the local
+  `claude --print` CLI. Not available on a deployed site (no endpoint);
+  `isClaudeLocalAvailable()` probes `/_ai/available` and returns false there.
 - `webllm` (in webllm.js, separate path) — for grading only, runs in-browser.
 
 `hasApiKey` gate in 5 places (WorkspaceView, DashboardView, DocumentsView,
@@ -183,11 +192,9 @@ system prompt marks active doc with `[ACTIVE]` so AI knows the user's focus.
 - Heterogeneous workspace tabs (deck tabs in the reader pane)
 - `T.bgSub` background on card rows inside sidebars (caused discoloration)
 - "Studio" label (renamed to "Tool Bar")
-
-## react-rnd is installed but unused
-
-`package.json` has `react-rnd` from the floating-windows era. No source
-file imports it. Safe to `npm uninstall react-rnd` whenever.
+- Electron desktop packaging + Capacitor iOS/Android packaging (removed;
+  web-only now — see the scope note at the top)
+- `react-rnd` dependency (floating-windows era; uninstalled)
 
 ## Likely next tasks
 
@@ -199,9 +206,11 @@ file imports it. Safe to `npm uninstall react-rnd` whenever.
 
 ## Build / dev commands
 
-- `npm run dev` — Vite dev (port 5173) + `/_ai/*` endpoints
-- `npm run electron:dev` — `vite build` then open Electron with preload bridge
-- `npm run build` — production bundle (no plugin /_ai endpoints)
+- `npm run dev` — Vite dev (port 5173) + the `/_ai/*` and `/_yt/*` dev endpoints
+- `npm run build` — production web bundle (no plugin `/_ai` / `/_yt` endpoints)
+- `npm run build:dev` — production bundle in development mode
+- `npm run preview` — serve the built bundle (port 4173)
+- `npm run lint` — eslint over `src/`
 
 ## How to start working
 

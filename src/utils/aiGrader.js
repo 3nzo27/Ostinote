@@ -46,11 +46,11 @@ const PROVIDERS = {
       { id: "gemini-2.0-flash",      name: "Gemini 2.0 Flash",      note: "Legacy balanced" },
     ],
   },
-  // Dev-only: routes prompts through the locally-installed `claude` CLI
-  // (Claude Code). Uses whatever OAuth login is already on this machine —
-  // no API key. Only works in the Electron desktop build, since the bridge
-  // lives in the main process. The Settings UI should only surface this
-  // provider when `window.ostinoteAI` is present.
+  // Local-dev only: routes prompts through the locally-installed `claude`
+  // CLI (Claude Code) via the Vite dev server's /_ai bridge. Uses whatever
+  // OAuth login is on this machine — no API key. Not available on a
+  // deployed website (the /_ai endpoint only exists under `npm run dev`),
+  // so the Settings UI gates it behind isClaudeLocalAvailable().
   "claude-local": {
     name: "Claude (this device)",
     placeholder: "", // no key needed
@@ -126,27 +126,12 @@ async function callGoogle(apiKey, model, prompt, { maxTokens = 1000, signal } = 
   return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
 }
 
-// Bridge into the locally-installed `claude` CLI. Two transports, picked
-// at call time:
-//   1. Electron: `window.ostinoteAI.complete` exposed by preload.cjs
-//   2. Vite dev: `POST /_ai/complete` served by vite-plugin-claude-bridge
-// Both wrap the same underlying `claude --print` invocation in the Node
-// side of the build, so behavior is identical.
+// Bridge into the locally-installed `claude` CLI via the Vite dev
+// server's `POST /_ai/complete` endpoint (see vite-plugin-claude-bridge),
+// which wraps `claude --print`. This only exists during `npm run dev` —
+// a deployed website has no such endpoint, so claude-local is a
+// local-development convenience. Cloud providers work everywhere.
 async function callClaudeLocal(model, prompt, { signal } = {}) {
-  const electronBridge = typeof window !== "undefined" ? window.ostinoteAI : null;
-  if (electronBridge?.complete) {
-    const p = electronBridge.complete({ prompt, model });
-    if (signal) {
-      return Promise.race([
-        p,
-        new Promise((_, reject) => {
-          if (signal.aborted) reject(new DOMException("Aborted", "AbortError"));
-          signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
-        }),
-      ]);
-    }
-    return p;
-  }
   const res = await fetch("/_ai/complete", {
     method: "POST",
     signal,
@@ -174,15 +159,11 @@ export function hasAiCredentials(settings) {
 // True if the dev-only Claude (local) provider can be used here. Probes
 // both transports; the renderer awaits this once at mount.
 //
-// In Electron, the preload bridge is detectable synchronously, but we
-// keep the API async so the Vite-dev branch can fetch /_ai/available.
+// Probes the Vite dev middleware at /_ai/available. Returns false on a
+// deployed website (the endpoint only exists under `npm run dev`), which
+// is the correct signal — claude-local isn't available there.
 export async function isClaudeLocalAvailable() {
   if (typeof window === "undefined") return false;
-  if (window.ostinoteAI?.complete) {
-    try { return await window.ostinoteAI.isAvailable(); } catch { return false; }
-  }
-  // Probe the Vite middleware. Times out fast on production builds where
-  // /_ai/* doesn't exist (the response will 404 or similar).
   try {
     const res = await fetch("/_ai/available", { method: "GET" });
     if (!res.ok) return false;
